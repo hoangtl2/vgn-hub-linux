@@ -242,6 +242,8 @@
     root.setProperty("--wp-blur", `${wp.blur}px`);
     root.setProperty("--wp-dim", (wp.dim / 100).toFixed(2));
     root.setProperty("--wp-opacity", (wp.opacity / 100).toFixed(2));
+    // blur(0px) still forces WebKit to allocate an offscreen filter surface; drop it entirely.
+    document.body.classList.toggle("wp-no-blur", wp.blur === 0);
 
     const presetLayer = document.getElementById("bg-preset-layer");
     const customLayer = document.getElementById("bg-custom-layer");

@@ -13,6 +13,16 @@ from vgn_hub import config
 from vgn_hub.registry import find_device_spec
 from vgn_hub.transport import HidDeviceInfo
 
+try:
+    import gi
+
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+
+    _HAS_GDKPIXBUF = True
+except (ImportError, ValueError):
+    _HAS_GDKPIXBUF = False
+
 
 class TestGuiConfigAndWallpaper(unittest.TestCase):
     def test_default_config_contains_wallpaper_and_finish(self) -> None:
@@ -122,6 +132,84 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
 
             config._clear_custom_wallpaper_files(wallpaper_dir=wp_dir)
             self.assertFalse(installed2.exists())
+
+    def test_install_copies_original_when_downscale_not_needed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "photo.jpg"
+            src.write_bytes(b"jpeg-bytes")
+            with patch.object(config, "_downscale_wallpaper", return_value=None) as ds:
+                dest = config._install_custom_wallpaper(src, wallpaper_dir=root / "wp", max_edge=1234)
+            ds.assert_called_once()
+            self.assertEqual(ds.call_args.kwargs["max_edge"], 1234)
+            self.assertEqual(dest.suffix, ".jpg")
+            self.assertEqual(dest.read_bytes(), b"jpeg-bytes")
+
+    def test_install_prefers_downscaled_output_and_cleans_old_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wp_dir = root / "wp"
+            wp_dir.mkdir()
+            stale = wp_dir / "custom_1.webp"
+            stale.write_bytes(b"old")
+            src = root / "huge.webp"
+            src.write_bytes(b"webp-bytes")
+
+            def fake_downscale(_src: Path, dest_stem: Path, max_edge: int) -> Path:
+                out = dest_stem.with_suffix(".jpg")
+                out.write_bytes(b"small")
+                return out
+
+            with patch.object(config, "_downscale_wallpaper", side_effect=fake_downscale):
+                dest = config._install_custom_wallpaper(src, wallpaper_dir=wp_dir)
+
+            self.assertEqual(dest.suffix, ".jpg")
+            self.assertEqual(dest.read_bytes(), b"small")
+            self.assertFalse(stale.exists())
+            self.assertEqual(sorted(p.name for p in wp_dir.iterdir()), [dest.name])
+
+    def test_downscale_skips_gif_without_touching_gdkpixbuf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "anim.gif"
+            src.write_bytes(b"GIF89a")
+            self.assertIsNone(config._downscale_wallpaper(src, Path(tmp) / "out", max_edge=10))
+
+    @unittest.skipUnless(_HAS_GDKPIXBUF, "GdkPixbuf (PyGObject) not available")
+    def test_downscale_real_images_with_gdkpixbuf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wp_dir = root / "wp"
+
+            def make(name: str, w: int, h: int, alpha: bool, fmt: str) -> Path:
+                pb = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, alpha, 8, w, h)
+                pb.fill(0x3366CC80 if alpha else 0x3366CCFF)
+                path = root / name
+                pb.savev(str(path), fmt, [], [])
+                return path
+
+            # Opaque oversized image -> JPEG, aspect ratio preserved
+            wide = make("wide.png", 4000, 1000, False, "png")
+            out = config._install_custom_wallpaper(wide, wallpaper_dir=wp_dir, max_edge=2560)
+            _fmt, w, h = GdkPixbuf.Pixbuf.get_file_info(str(out))
+            self.assertEqual(out.suffix, ".jpg")
+            self.assertEqual((w, h), (2560, 640))
+
+            # Transparent oversized image -> PNG keeps alpha
+            time.sleep(0.005)
+            tall = make("tall.png", 1500, 3000, True, "png")
+            out = config._install_custom_wallpaper(tall, wallpaper_dir=wp_dir, max_edge=2560)
+            self.assertEqual(out.suffix, ".png")
+            reloaded = GdkPixbuf.Pixbuf.new_from_file(str(out))
+            self.assertTrue(reloaded.get_has_alpha())
+            self.assertEqual((reloaded.get_width(), reloaded.get_height()), (1280, 2560))
+
+            # Already small -> byte-identical copy, original format kept
+            time.sleep(0.005)
+            small = make("small.png", 800, 600, False, "png")
+            out = config._install_custom_wallpaper(small, wallpaper_dir=wp_dir, max_edge=2560)
+            self.assertEqual(out.suffix, ".png")
+            self.assertEqual(out.read_bytes(), small.read_bytes())
+            self.assertEqual(len(list(wp_dir.iterdir())), 1)
 
     def test_serialize_device(self) -> None:
         spec = find_device_spec(0x391D, 0x1A25)

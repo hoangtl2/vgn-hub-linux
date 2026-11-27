@@ -76,6 +76,13 @@ body.theme-solid .bg-ambient {
   display: none;
 }
 
+/* No blur requested: skip the filter surface and the oversized bleed area it needed */
+body.wp-no-blur .bg-preset-layer,
+body.wp-no-blur .bg-custom-layer {
+  inset: 0;
+  filter: none;
+}
+
 .bg-custom-layer {
   background-size: cover;
   background-position: center;

@@ -23,6 +23,10 @@ WALLPAPER_PRESET_IDS = (
 )
 ALLOWED_WALLPAPER_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".avif", ".gif")
 MAX_WALLPAPER_BYTES = 30 * 1024 * 1024
+# Longest edge (px) kept for custom wallpapers; larger images are downscaled on install to
+# cap the decoded bitmap WebKit holds in RAM (2560x1440 RGBA ~= 14 MB).
+MAX_WALLPAPER_EDGE = 2560
+WALLPAPER_JPEG_QUALITY = 90
 MOUSE_FINISHES = ("obsidian", "frost", "sakura", "sunset")
 
 
@@ -91,8 +95,54 @@ def _normalize_wallpaper(raw: Any, fallback: dict[str, Any] | None = None) -> di
     return wp
 
 
-def _install_custom_wallpaper(src_path: Path, wallpaper_dir: Path | None = None) -> Path:
-    """Validate and copy a user-selected image into the app wallpaper directory."""
+def _downscale_wallpaper(src_path: Path, dest_stem: Path, max_edge: int = MAX_WALLPAPER_EDGE) -> Path | None:
+    """Re-encode an oversized wallpaper so its longest edge is at most ``max_edge`` pixels.
+
+    WebKit keeps the fully decoded bitmap of the background in RAM (width x height x 4 bytes),
+    so a 6000x4000 photo costs ~96 MB while a 2560x1707 copy costs ~17 MB.
+
+    Returns the written file (``dest_stem`` + ``.jpg``/``.png``), or ``None`` when the image is
+    already small enough, is animated (GIF), or GdkPixbuf is unavailable / cannot decode it.
+    In that case the caller should keep the original file as-is.
+    """
+    if src_path.suffix.lower() == ".gif":
+        return None  # keep animation intact
+    try:
+        import gi
+
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf, GLib
+    except (ImportError, ValueError):
+        return None
+
+    try:
+        fmt, width, height = GdkPixbuf.Pixbuf.get_file_info(str(src_path))
+        if fmt is None or width <= 0 or height <= 0 or max(width, height) <= max_edge:
+            return None
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(src_path), max_edge, max_edge, True)
+        pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
+        if pixbuf.get_has_alpha():
+            dest = dest_stem.with_suffix(".png")
+            pixbuf.savev(str(dest), "png", ["compression"], ["6"])
+        else:
+            dest = dest_stem.with_suffix(".jpg")
+            pixbuf.savev(str(dest), "jpeg", ["quality"], [str(WALLPAPER_JPEG_QUALITY)])
+        del pixbuf
+        return dest
+    except (GLib.Error, OSError, TypeError, ValueError):
+        return None
+
+
+def _install_custom_wallpaper(
+    src_path: Path,
+    wallpaper_dir: Path | None = None,
+    max_edge: int = MAX_WALLPAPER_EDGE,
+) -> Path:
+    """Validate a user-selected image and store a RAM-friendly copy in the wallpaper directory.
+
+    Images whose longest edge exceeds ``max_edge`` are downscaled (see ``_downscale_wallpaper``);
+    smaller, animated, or undecodable images are copied byte-for-byte.
+    """
     if not src_path.is_file():
         raise ValueError(f"Wallpaper image not found: {src_path}")
     suffix = src_path.suffix.lower()
@@ -107,8 +157,11 @@ def _install_custom_wallpaper(src_path: Path, wallpaper_dir: Path | None = None)
 
     target_dir = wallpaper_dir or WALLPAPER_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
-    dest = target_dir / f"custom_{int(time.time() * 1000)}{suffix}"
-    shutil.copy2(src_path, dest)
+    dest_stem = target_dir / f"custom_{int(time.time() * 1000)}"
+    dest = _downscale_wallpaper(src_path, dest_stem, max_edge=max_edge)
+    if dest is None:
+        dest = dest_stem.with_suffix(suffix)
+        shutil.copy2(src_path, dest)
 
     for existing in target_dir.glob("custom_*"):
         if existing != dest and existing.is_file():
