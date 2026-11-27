@@ -607,7 +607,10 @@ body.theme-solid .bg-ambient {
   border-radius: var(--radius-lg);
 }
 
-.mouse-svg-bottom { width: 215px; height: 276px; }
+.mouse-photo-wrap.mouse-photo-bottom {
+  width: 150px;
+  height: 290px;
+}
 
 .dpi-grid {
   display: grid;

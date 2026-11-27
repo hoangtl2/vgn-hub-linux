@@ -38,57 +38,23 @@ window.VgnMouseSvg = {
 
   renderBottom({ ledColor = "#ffff00" } = {}) {
     return `
-      <svg class="mouse-svg-bottom" viewBox="0 0 270 380" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="bottomShell" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#282a31"/>
-            <stop offset="100%" stop-color="#17181d"/>
-          </linearGradient>
-          <linearGradient id="ptfe" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#f7f8fb"/>
-            <stop offset="100%" stop-color="#d8dce5"/>
-          </linearGradient>
-          <radialGradient id="dpiGlow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stop-color="${ledColor}" stop-opacity="0.95"/>
-            <stop offset="50%" stop-color="${ledColor}" stop-opacity="0.35"/>
-            <stop offset="100%" stop-color="${ledColor}" stop-opacity="0"/>
-          </radialGradient>
-        </defs>
-
-        <!-- Base housing matching full-shouldered, broad-bottomed Dragonfly 3 Ultra silhouette -->
-        <path d="M135 18 C82 18 55 38 49 78 C46 112 46 146 47 180 C48 220 46 266 54 304 C64 344 92 362 135 362 C178 362 206 344 216 304 C224 266 222 220 223 180 C224 146 224 112 221 78 C215 38 188 18 135 18 Z"
-              fill="url(#bottomShell)" stroke="#4c505c" stroke-width="1.3"/>
-
-        <!-- Top PTFE skate -->
-        <path d="M72 41 C84 30 104 27 135 27 C166 27 186 30 198 41 C207 50 209 69 206 84 C194 90 174 92 135 92 C96 92 76 90 64 84 C61 69 63 50 72 41 Z"
-              fill="url(#ptfe)" stroke="#b8becb" stroke-width="1"/>
-
-        <!-- Bottom U PTFE skate -->
-        <path d="M62 274 C70 318 96 346 135 346 C174 346 200 318 208 274 L194 272 C186 308 164 328 135 328 C106 328 84 308 76 272 Z"
-              fill="url(#ptfe)" stroke="#b8becb" stroke-width="1"/>
-
-        <!-- Live DPI Indicator LED dot -->
-        <circle cx="98" cy="124" r="14" fill="url(#dpiGlow)"/>
-        <circle cx="98" cy="124" r="4.5" fill="${ledColor}" stroke="#121318" stroke-width="1.2"/>
-
-        <!-- DPI button (left) -->
-        <rect x="80" y="158" width="18" height="28" rx="8" fill="#131419" stroke="#505562" stroke-width="1.1"/>
-        <text x="89" y="200" fill="#8d92a3" font-size="8.5" text-anchor="middle" font-family="sans-serif">DPI</text>
-
-        <!-- PAW3950 center sensor + PTFE ring -->
-        <ellipse cx="135" cy="172" rx="20" ry="26" fill="url(#ptfe)" stroke="#b8becb" stroke-width="1"/>
-        <ellipse cx="135" cy="172" rx="12" ry="16" fill="#14151a" stroke="#393c46" stroke-width="1"/>
-        <circle cx="135" cy="172" r="4.8" fill="#090a0d" stroke="#5d6272" stroke-width="1"/>
-
-        <!-- Mode switch (2.4G / OFF / BT or USB) -->
-        <rect x="172" y="158" width="18" height="28" rx="8" fill="#131419" stroke="#505562" stroke-width="1.1"/>
-        <rect x="176" y="162" width="10" height="10" rx="4" fill="#63697a"/>
-        <text x="181" y="200" fill="#8d92a3" font-size="8.5" text-anchor="middle" font-family="sans-serif">MODE</text>
-
-        <!-- Dongle storage bay outline -->
-        <rect x="104" y="216" width="62" height="58" rx="9" fill="#1b1c22" stroke="#333640" stroke-width="1"/>
-        <text x="135" y="249" fill="#666b7a" font-size="8" text-anchor="middle" font-family="sans-serif">PAW3950</text>
-      </svg>
+      <div class="mouse-photo-wrap mouse-photo-bottom">
+        <img class="mouse-photo-img" src="assets/dragonfly3-bottom.png" alt="Dragonfly 3 Ultra Bottom" draggable="false"/>
+        <svg class="mouse-photo-overlay" viewBox="0 0 172 332" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="dpiGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="${ledColor}" stop-opacity="1"/>
+              <stop offset="32%" stop-color="${ledColor}" stop-opacity="0.72"/>
+              <stop offset="68%" stop-color="${ledColor}" stop-opacity="0.22"/>
+              <stop offset="100%" stop-color="${ledColor}" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <!-- Live DPI indicator LED over the physical bottom LED aperture -->
+          <circle cx="44.5" cy="127.5" r="11" fill="url(#dpiGlow)"/>
+          <circle cx="44.5" cy="127.5" r="3.2" fill="${ledColor}" opacity="0.95"/>
+          <circle cx="44.5" cy="127.5" r="1.4" fill="#ffffff" opacity="0.9"/>
+        </svg>
+      </div>
     `;
   },
 
