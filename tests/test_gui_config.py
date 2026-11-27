@@ -9,14 +9,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from vgn_hub import gui
+from vgn_hub import config
 from vgn_hub.registry import find_device_spec
 from vgn_hub.transport import HidDeviceInfo
 
 
 class TestGuiConfigAndWallpaper(unittest.TestCase):
     def test_default_config_contains_wallpaper_and_finish(self) -> None:
-        cfg = gui._default_config()
+        cfg = config._default_config()
         self.assertEqual(cfg["mouse_finish"], "obsidian")
         self.assertIn("wallpaper", cfg)
         wp = cfg["wallpaper"]
@@ -40,10 +40,10 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
             }
             cfg_file.write_text(json.dumps(legacy_payload), encoding="utf-8")
 
-            with patch.object(gui, "CONFIG_DIR", cfg_dir), patch.object(
-                gui, "CONFIG_FILE", cfg_file
-            ), patch.object(gui, "WALLPAPER_DIR", wp_dir):
-                loaded = gui._load_config()
+            with patch.object(config, "CONFIG_DIR", cfg_dir), patch.object(
+                config, "CONFIG_FILE", cfg_file
+            ), patch.object(config, "WALLPAPER_DIR", wp_dir):
+                loaded = config._load_config()
 
             self.assertEqual(loaded["lang"], "en")
             self.assertEqual(loaded["theme"], "solid")
@@ -59,7 +59,7 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
             img = Path(tmp) / "bg.png"
             img.write_bytes(b"\x89PNG\r\n\x1a\nfake")
 
-            norm = gui._normalize_wallpaper(
+            norm = config._normalize_wallpaper(
                 {
                     "mode": "custom",
                     "preset": "nonexistent-theme",
@@ -77,7 +77,7 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
             self.assertTrue(norm["custom_url"].startswith("file://"))
             self.assertIn("?v=", norm["custom_url"])
 
-            missing = gui._normalize_wallpaper(
+            missing = config._normalize_wallpaper(
                 {
                     "mode": "custom",
                     "preset": "cyber-indigo",
@@ -102,25 +102,25 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
             bad_ext.write_text("not an image", encoding="utf-8")
             big_img.write_bytes(b"0" * 64)
 
-            installed1 = gui._install_custom_wallpaper(src1, wallpaper_dir=wp_dir)
+            installed1 = config._install_custom_wallpaper(src1, wallpaper_dir=wp_dir)
             self.assertTrue(installed1.is_file())
             self.assertEqual(installed1.parent, wp_dir)
             self.assertEqual(installed1.suffix, ".png")
 
             time.sleep(0.005)
-            installed2 = gui._install_custom_wallpaper(src2, wallpaper_dir=wp_dir)
+            installed2 = config._install_custom_wallpaper(src2, wallpaper_dir=wp_dir)
             self.assertTrue(installed2.is_file())
             self.assertFalse(installed1.exists())
             self.assertEqual(installed2.suffix, ".webp")
 
             with self.assertRaises(ValueError):
-                gui._install_custom_wallpaper(bad_ext, wallpaper_dir=wp_dir)
+                config._install_custom_wallpaper(bad_ext, wallpaper_dir=wp_dir)
 
-            with patch.object(gui, "MAX_WALLPAPER_BYTES", 16):
+            with patch.object(config, "MAX_WALLPAPER_BYTES", 16):
                 with self.assertRaises(ValueError):
-                    gui._install_custom_wallpaper(big_img, wallpaper_dir=wp_dir)
+                    config._install_custom_wallpaper(big_img, wallpaper_dir=wp_dir)
 
-            gui._clear_custom_wallpaper_files(wallpaper_dir=wp_dir)
+            config._clear_custom_wallpaper_files(wallpaper_dir=wp_dir)
             self.assertFalse(installed2.exists())
 
     def test_serialize_device(self) -> None:
@@ -138,7 +138,7 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
             accessible=True,
             spec=spec,
         )
-        out = gui._serialize_device(dev)
+        out = config._serialize_device(dev)
         self.assertEqual(out["path"], "/dev/hidraw3")
         self.assertEqual(out["vid_pid"], "391d:1a25")
         self.assertTrue(out["is_wireless"])
