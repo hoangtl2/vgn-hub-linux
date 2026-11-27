@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import sys
 import threading
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -40,21 +42,168 @@ from .transport import FeatureHidTransport, TransportError, discover_devices
 WEB_DIR = Path(__file__).resolve().parent / "web"
 CONFIG_DIR = Path.home() / ".config" / "vgn-hub-linux"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+WALLPAPER_DIR = CONFIG_DIR / "wallpapers"
+
+WALLPAPER_PRESET_IDS = (
+    "vgn-crimson",
+    "obsidian-aurora",
+    "cyber-indigo",
+    "dragonfly-gold",
+    "emerald-pulse",
+    "pure-minimal",
+)
+ALLOWED_WALLPAPER_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".avif", ".gif")
+MAX_WALLPAPER_BYTES = 30 * 1024 * 1024
+MOUSE_FINISHES = ("obsidian", "frost", "sakura", "sunset")
 
 GTK_CSS = """
 window.vgn-glass {
-    background-color: rgba(20, 14, 24, 0.80);
+    background-color: rgba(14, 10, 20, 0.20);
 }
 window.vgn-solid {
-    background-color: #121118;
+    background-color: #111218;
 }
 """
+
+
+def _default_wallpaper() -> dict[str, Any]:
+    """Return default wallpaper appearance settings."""
+    return {
+        "mode": "preset",
+        "preset": "vgn-crimson",
+        "custom_path": "",
+        "custom_url": "",
+        "blur": 0,
+        "dim": 28,
+        "opacity": 88,
+        "watermark": True,
+    }
+
+
+def _clamp_int(value: Any, low: int, high: int, default: int) -> int:
+    try:
+        num = int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, num))
+
+
+def _normalize_wallpaper(raw: Any, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Normalize and validate wallpaper settings, resolving any existing custom image URI."""
+    wp = copy.deepcopy(fallback) if isinstance(fallback, dict) else _default_wallpaper()
+    if isinstance(raw, dict):
+        preset = raw.get("preset")
+        if preset in WALLPAPER_PRESET_IDS:
+            wp["preset"] = preset
+        mode = raw.get("mode")
+        if mode in ("preset", "custom"):
+            wp["mode"] = mode
+        if "custom_path" in raw:
+            wp["custom_path"] = str(raw.get("custom_path") or "")
+        if "blur" in raw:
+            wp["blur"] = _clamp_int(raw.get("blur"), 0, 24, int(wp.get("blur", 0)))
+        if "dim" in raw:
+            wp["dim"] = _clamp_int(raw.get("dim"), 0, 85, int(wp.get("dim", 28)))
+        if "opacity" in raw:
+            wp["opacity"] = _clamp_int(raw.get("opacity"), 25, 100, int(wp.get("opacity", 88)))
+        if "watermark" in raw:
+            wp["watermark"] = bool(raw.get("watermark"))
+
+    if wp.get("preset") not in WALLPAPER_PRESET_IDS:
+        wp["preset"] = "vgn-crimson"
+    if wp.get("mode") not in ("preset", "custom"):
+        wp["mode"] = "preset"
+
+    custom_path_str = str(wp.get("custom_path") or "").strip()
+    resolved_url = ""
+    if custom_path_str:
+        try:
+            p = Path(custom_path_str)
+            if p.is_file():
+                resolved_url = f"{p.resolve().as_uri()}?v={p.stat().st_mtime_ns}"
+            else:
+                custom_path_str = ""
+        except OSError:
+            custom_path_str = ""
+
+    wp["custom_path"] = custom_path_str
+    wp["custom_url"] = resolved_url
+    if not resolved_url and wp["mode"] == "custom":
+        wp["mode"] = "preset"
+
+    return wp
+
+
+def _install_custom_wallpaper(src_path: Path, wallpaper_dir: Path | None = None) -> Path:
+    """Validate and copy a user-selected image into the app wallpaper directory."""
+    if not src_path.is_file():
+        raise ValueError(f"Wallpaper image not found: {src_path}")
+    suffix = src_path.suffix.lower()
+    if suffix not in ALLOWED_WALLPAPER_SUFFIXES:
+        raise ValueError(
+            f"Unsupported wallpaper format '{suffix or 'unknown'}'. "
+            f"Allowed: {', '.join(ALLOWED_WALLPAPER_SUFFIXES)}"
+        )
+    size = src_path.stat().st_size
+    if size > MAX_WALLPAPER_BYTES:
+        raise ValueError("Wallpaper image exceeds 30 MiB size limit.")
+
+    target_dir = wallpaper_dir or WALLPAPER_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dest = target_dir / f"custom_{int(time.time() * 1000)}{suffix}"
+    shutil.copy2(src_path, dest)
+
+    for existing in target_dir.glob("custom_*"):
+        if existing != dest and existing.is_file():
+            try:
+                existing.unlink()
+            except OSError:
+                pass
+
+    return dest
+
+
+def _clear_custom_wallpaper_files(wallpaper_dir: Path | None = None) -> None:
+    """Delete any custom wallpaper files managed by VGN Hub."""
+    target_dir = wallpaper_dir or WALLPAPER_DIR
+    if not target_dir.is_dir():
+        return
+    for existing in target_dir.glob("custom_*"):
+        if existing.is_file():
+            try:
+                existing.unlink()
+            except OSError:
+                pass
+
+
+def _serialize_device(dev: Any) -> dict[str, Any]:
+    """Serialize a discovered HidDeviceInfo object to a JSON-safe dictionary."""
+    spec = getattr(dev, "spec", None)
+    return {
+        "path": str(getattr(dev, "path", "")),
+        "vid": int(getattr(dev, "vid", 0)),
+        "pid": int(getattr(dev, "pid", 0)),
+        "vid_pid": str(getattr(dev, "vid_pid", "")),
+        "name": str(getattr(dev, "name", "")),
+        "bcd_device": str(getattr(dev, "bcd_device", "")),
+        "phys": str(getattr(dev, "phys", "")),
+        "accessible": bool(getattr(dev, "accessible", False)),
+        "error": str(getattr(dev, "error", "")),
+        "is_wireless": bool(getattr(dev, "is_wireless", False)),
+        "slug": str(spec.slug) if spec is not None else "",
+        "sensor": str(spec.sensor) if spec is not None else "",
+        "dpi_max": int(spec.dpi_max) if spec is not None else 0,
+        "max_polling_hz": int(spec.max_polling_hz) if spec is not None else 0,
+        "model_name": str(spec.name) if spec is not None else str(getattr(dev, "name", "")),
+    }
 
 
 def _default_config() -> dict[str, Any]:
     return {
         "lang": "vi",
         "theme": "glass",
+        "mouse_finish": "obsidian",
+        "wallpaper": _default_wallpaper(),
         "macros": [
             {"slot": i, "name": f"Macro {i + 1}", "repeat": 1, "events": []}
             for i in range(16)
@@ -72,6 +221,9 @@ def _load_config() -> dict[str, Any]:
                     cfg["lang"] = raw["lang"]
                 if raw.get("theme") in ("glass", "solid"):
                     cfg["theme"] = raw["theme"]
+                if raw.get("mouse_finish") in MOUSE_FINISHES:
+                    cfg["mouse_finish"] = raw["mouse_finish"]
+                cfg["wallpaper"] = _normalize_wallpaper(raw.get("wallpaper"), cfg["wallpaper"])
                 if isinstance(raw.get("macros"), list):
                     by_slot = {int(m["slot"]): m for m in raw["macros"] if isinstance(m, dict) and "slot" in m}
                     merged = []
@@ -294,6 +446,7 @@ class VgnHubWindow(Adw.ApplicationWindow):
         self._config = _load_config()
         self._demo_mode = demo
         self._demo = DemoMouseSession()
+        self._selected_device_path: str | None = None
         self._transport: FeatureHidTransport | None = None
         self._client: RyMouseClient | None = None
         self._hw_lock = threading.Lock()
@@ -352,7 +505,7 @@ class VgnHubWindow(Adw.ApplicationWindow):
         with self._hw_lock:
             if self._client is not None and self._transport is not None and self._transport.is_open:
                 return self._client
-            transport = FeatureHidTransport()
+            transport = FeatureHidTransport(device_path=self._selected_device_path)
             info = transport.open()
             client = create_client(transport, info)
             transport.start_event_listener(self._on_hw_dpi_event)
@@ -419,6 +572,9 @@ class VgnHubWindow(Adw.ApplicationWindow):
         if action == "import_backup_dialog":
             self._handle_import_dialog(req_id)
             return
+        if action == "choose_wallpaper_dialog":
+            self._handle_choose_wallpaper_dialog(req_id)
+            return
 
         threading.Thread(
             target=self._dispatch_worker,
@@ -451,16 +607,26 @@ class VgnHubWindow(Adw.ApplicationWindow):
             ),
         }
 
+    def _safe_discover_devices(self) -> list[dict[str, Any]]:
+        try:
+            return [_serialize_device(d) for d in discover_devices()]
+        except Exception:
+            return []
+
     def _build_state_bundle(self) -> dict[str, Any]:
+        self._config["wallpaper"] = _normalize_wallpaper(self._config.get("wallpaper"))
         if self._demo_mode:
             state = self._demo.read_state()
+            devices: list[dict[str, Any]] = []
         else:
             self._close_hardware()
             client = self._ensure_hardware()
             state = client.read_all_state()
+            devices = self._safe_discover_devices()
         return {
             "connected": True,
             "state": state.to_dict(),
+            "devices": devices,
             "config": self._config,
             "catalog": self._catalog_payload(),
         }
@@ -470,20 +636,31 @@ class VgnHubWindow(Adw.ApplicationWindow):
             try:
                 return self._build_state_bundle()
             except (TransportError, ProtocolError) as exc:
+                self._config["wallpaper"] = _normalize_wallpaper(self._config.get("wallpaper"))
                 return {
                     "connected": False,
                     "error": str(exc),
-                    "devices": [asdict(d) for d in discover_devices()],
+                    "devices": self._safe_discover_devices(),
                     "config": self._config,
                     "catalog": self._catalog_payload(),
                 }
 
+        if action == "scan_devices":
+            return {
+                "devices": self._safe_discover_devices(),
+                "udev_rule_installed": self._catalog_payload()["udev_rule_installed"],
+            }
+
         if action == "enter_demo":
+            self._selected_device_path = None
             self._close_hardware()
             self._demo_mode = True
             return self._build_state_bundle()
 
         if action == "connect_real":
+            device_path = params.get("device_path")
+            self._selected_device_path = str(device_path) if device_path else None
+            self._close_hardware()
             self._demo_mode = False
             return self._build_state_bundle()
 
@@ -496,6 +673,22 @@ class VgnHubWindow(Adw.ApplicationWindow):
             if params.get("theme") in ("glass", "solid"):
                 self._config["theme"] = params["theme"]
                 GLib.idle_add(self._apply_window_theme, self._config["theme"])
+            if params.get("mouse_finish") in MOUSE_FINISHES:
+                self._config["mouse_finish"] = params["mouse_finish"]
+            if isinstance(params.get("wallpaper"), dict):
+                self._config["wallpaper"] = _normalize_wallpaper(
+                    params["wallpaper"],
+                    fallback=self._config.get("wallpaper"),
+                )
+            _save_config(self._config)
+            return {"config": self._config}
+
+        if action == "clear_custom_wallpaper":
+            _clear_custom_wallpaper_files()
+            self._config["wallpaper"] = _normalize_wallpaper(
+                {"mode": "preset", "custom_path": ""},
+                fallback=self._config.get("wallpaper"),
+            )
             _save_config(self._config)
             return {"config": self._config}
 
@@ -616,6 +809,48 @@ class VgnHubWindow(Adw.ApplicationWindow):
         store = Gio.ListStore.new(Gtk.FileFilter)
         store.append(flt)
         return store
+
+    def _make_image_filter(self) -> Gio.ListStore:
+        flt = Gtk.FileFilter()
+        flt.set_name("Wallpaper Images (*.png, *.jpg, *.webp, *.bmp, *.avif, *.gif)")
+        for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.avif", "*.gif"):
+            flt.add_pattern(pattern)
+        for mime in ("image/png", "image/jpeg", "image/webp", "image/bmp", "image/avif", "image/gif"):
+            flt.add_mime_type(mime)
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(flt)
+        return store
+
+    def _handle_choose_wallpaper_dialog(self, req_id: int) -> None:
+        dialog = Gtk.FileDialog(title="Choose App Wallpaper")
+        dialog.set_filters(self._make_image_filter())
+
+        def _done(dlg: Gtk.FileDialog, res: Gio.AsyncResult) -> None:
+            try:
+                gfile = dlg.open_finish(res)
+            except GLib.Error:
+                self._resolve_js(req_id, True, data={"cancelled": True})
+                return
+            path = gfile.get_path()
+            if not path:
+                self._resolve_js(req_id, False, error="No file path selected")
+                return
+
+            def _install() -> None:
+                try:
+                    dest = _install_custom_wallpaper(Path(path))
+                    self._config["wallpaper"] = _normalize_wallpaper(
+                        {"mode": "custom", "custom_path": str(dest)},
+                        fallback=self._config.get("wallpaper"),
+                    )
+                    _save_config(self._config)
+                    self._resolve_js(req_id, True, data={"cancelled": False, "config": self._config})
+                except Exception as exc:
+                    self._resolve_js(req_id, False, error=str(exc))
+
+            threading.Thread(target=_install, daemon=True).start()
+
+        dialog.open(self, None, _done)
 
     def _handle_export_dialog(self, req_id: int) -> None:
         dialog = Gtk.FileDialog(title="Export VGN Mouse Backup")

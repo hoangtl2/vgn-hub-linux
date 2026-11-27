@@ -50,11 +50,39 @@
     return m;
   })();
 
+  const WALLPAPER_PRESETS = [
+    "vgn-crimson",
+    "obsidian-aurora",
+    "cyber-indigo",
+    "dragonfly-gold",
+    "emerald-pulse",
+    "pure-minimal",
+  ];
+  const MOUSE_FINISHES = ["obsidian", "frost", "sakura", "sunset"];
+  const DEFAULT_WALLPAPER = {
+    mode: "preset",
+    preset: "vgn-crimson",
+    custom_path: "",
+    custom_url: "",
+    blur: 0,
+    dim: 28,
+    opacity: 88,
+    watermark: true,
+  };
+
   const store = {
+    view: "lobby",
     connected: false,
     error: "",
     state: null,
-    config: { lang: "vi", theme: "glass", macros: [] },
+    devices: [],
+    config: {
+      lang: "vi",
+      theme: "glass",
+      mouse_finish: "obsidian",
+      wallpaper: { ...DEFAULT_WALLPAPER },
+      macros: [],
+    },
     catalog: { actions: [], hid_keys: [], supported_models: [], udev_rule_installed: true },
     page: "keys",
     selectedSlot: 0,
@@ -67,10 +95,14 @@
     isRecording: false,
     lastRecTime: 0,
     xySplit: false,
+    wallpaperOpen: false,
+    addDeviceOpen: false,
+    scanningDevices: false,
   };
 
   let nextReqId = 1;
   let rotCommitTimer = null;
+  let wpCommitTimer = null;
   const pending = new Map();
 
   function rpc(action, params = {}) {
@@ -99,11 +131,13 @@
     if (!store.state) return;
     if (name === "dpi_changed" && typeof data.active_dpi === "number") {
       store.state.active_dpi = data.active_dpi;
-      renderAll();
+      if (store.view === "lobby") renderLobby();
+      else renderAll();
     } else if (name === "battery") {
       if (typeof data.battery === "number") store.state.battery = data.battery;
       if (typeof data.is_sleep === "boolean") store.state.is_sleep = data.is_sleep;
       renderChrome();
+      if (store.view === "lobby") renderLobby();
     }
   };
 
@@ -188,15 +222,91 @@
     return st.color || "#ffff00";
   }
 
+  function cssUrl(url) {
+    return `url("${String(url || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}")`;
+  }
+
+  function getWallpaper() {
+    const raw = store.config?.wallpaper;
+    const wp = { ...DEFAULT_WALLPAPER, ...(raw && typeof raw === "object" ? raw : {}) };
+    if (!WALLPAPER_PRESETS.includes(wp.preset)) wp.preset = DEFAULT_WALLPAPER.preset;
+    if (wp.mode !== "custom" || !wp.custom_url) wp.mode = "preset";
+    wp.blur = Math.max(0, Math.min(24, Number(wp.blur) || 0));
+    wp.dim = Math.max(0, Math.min(85, Number(wp.dim ?? DEFAULT_WALLPAPER.dim)));
+    wp.opacity = Math.max(25, Math.min(100, Number(wp.opacity ?? DEFAULT_WALLPAPER.opacity)));
+    wp.watermark = wp.watermark !== false;
+    return wp;
+  }
+
+  function applyWallpaper() {
+    const wp = getWallpaper();
+    const root = document.documentElement.style;
+    root.setProperty("--wp-blur", `${wp.blur}px`);
+    root.setProperty("--wp-dim", (wp.dim / 100).toFixed(2));
+    root.setProperty("--wp-opacity", (wp.opacity / 100).toFixed(2));
+
+    const presetLayer = document.getElementById("bg-preset-layer");
+    const customLayer = document.getElementById("bg-custom-layer");
+    const watermarkLayer = document.getElementById("bg-watermark-layer");
+    const swatchEl = document.getElementById("wp-trigger-swatch");
+
+    if (presetLayer) {
+      presetLayer.className = `bg-preset-layer wp-preset-${wp.preset}`;
+      presetLayer.hidden = wp.mode === "custom" && Boolean(wp.custom_url);
+    }
+    if (customLayer) {
+      const hasCustom = wp.mode === "custom" && Boolean(wp.custom_url);
+      customLayer.hidden = !hasCustom;
+      customLayer.style.backgroundImage = hasCustom ? cssUrl(wp.custom_url) : "";
+    }
+    if (watermarkLayer) {
+      watermarkLayer.hidden = !wp.watermark;
+    }
+    if (swatchEl) {
+      if (wp.mode === "custom" && wp.custom_url) {
+        swatchEl.className = "wp-trigger-swatch";
+        swatchEl.style.backgroundImage = cssUrl(wp.custom_url);
+      } else {
+        swatchEl.className = `wp-trigger-swatch wp-preset-${wp.preset}`;
+        swatchEl.style.backgroundImage = "";
+      }
+    }
+  }
+
+  function commitWallpaperPrefs(partial, immediate = false) {
+    const nextWp = { ...getWallpaper(), ...partial };
+    store.config.wallpaper = nextWp;
+    applyWallpaper();
+
+    const flush = () => {
+      wpCommitTimer = null;
+      rpc("set_ui_prefs", { wallpaper: store.config.wallpaper }).catch(() => {});
+    };
+    if (wpCommitTimer) {
+      clearTimeout(wpCommitTimer);
+      wpCommitTimer = null;
+    }
+    if (immediate) flush();
+    else wpCommitTimer = setTimeout(flush, 180);
+  }
+
   function renderChrome() {
     const t = tr();
-    document.body.className = store.config.theme === "solid" ? "theme-solid" : "theme-glass";
-    document.getElementById("btn-theme").textContent = store.config.theme === "solid" ? "Solid" : "Glass";
+    const isSolid = store.config.theme === "solid";
+    document.body.classList.toggle("theme-solid", isSolid);
+    document.body.classList.toggle("theme-glass", !isSolid);
+    document.body.classList.toggle("view-lobby", store.view === "lobby");
+    document.body.classList.toggle("view-editor", store.view === "editor");
+
+    document.getElementById("btn-back-lobby").hidden = store.view !== "editor";
+    document.getElementById("btn-wallpaper").classList.toggle("is-open", store.wallpaperOpen);
+    document.getElementById("btn-theme").textContent = isSolid ? "Solid" : "Glass";
     document.getElementById("btn-lang").textContent = store.config.lang.toUpperCase();
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       const k = el.getAttribute("data-i18n");
       if (t[k]) el.textContent = t[k];
     });
+    applyWallpaper();
 
     const connPill = document.getElementById("conn-pill");
     const batPill = document.getElementById("battery-pill");
@@ -279,6 +389,457 @@
     } else {
       profList.innerHTML = `<div style="color:var(--text-dim);font-size:12px;">--</div>`;
       telGrid.innerHTML = `<div style="color:var(--text-dim);font-size:12px;">--</div>`;
+    }
+  }
+
+  function renderLobby() {
+    const t = tr();
+    const stage = document.getElementById("lobby-stage");
+    const finish = MOUSE_FINISHES.includes(store.config.mouse_finish)
+      ? store.config.mouse_finish
+      : "obsidian";
+
+    const finishDotsHtml = MOUSE_FINISHES.map(
+      (f) =>
+        `<button type="button" class="finish-dot ${finish === f ? "is-active" : ""}" data-finish-btn="${f}" title="${escHtml(t.lobby.finishNames[f] || f)}"></button>`
+    ).join("");
+
+    let cardHtml = "";
+    if (store.connected && store.state) {
+      const s = store.state;
+      const connLabel = s.is_demo
+        ? t.lobby.demoConn
+        : s.is_wireless
+          ? t.lobby.wirelessConn
+          : t.lobby.wiredConn;
+      const batPct = Math.max(0, Math.min(100, Number(s.battery ?? 100)));
+      const connSvg = s.is_wireless
+        ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>`
+        : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v13"/><path d="m8 11 4 4 4-4"/><rect x="8" y="17" width="8" height="4" rx="1"/></svg>`;
+
+      cardHtml = `
+        <div id="lobby-device-card" class="lobby-device-card" data-finish="${finish}" role="button" tabindex="0" title="${escHtml(t.lobby.cardHint)}">
+          <div class="lobby-card-top">
+            <div class="lobby-card-title">${escHtml(s.device_name)}</div>
+            <div class="finish-dots">${finishDotsHtml}</div>
+            ${s.is_demo ? `<span class="lobby-demo-badge">${escHtml(t.demoMode)}</span>` : ""}
+          </div>
+
+          <div class="lobby-mouse-wrap">
+            <div class="lobby-mouse-halo" aria-hidden="true"></div>
+            <img class="lobby-mouse-img" src="assets/dragonfly3-top.png" alt="${escHtml(s.device_name)}" draggable="false"/>
+            <span class="lobby-cta-pill">${escHtml(t.lobby.configureCta)} →</span>
+          </div>
+
+          <div class="lobby-card-status">
+            <span class="lobby-status-item">
+              <span class="lobby-bat-pill"><span class="lobby-bat-fill" style="width:${Math.max(10, batPct)}%"></span></span>
+              <span>${batPct}%</span>
+            </span>
+            <span class="lobby-status-sep">|</span>
+            <span class="lobby-status-item">
+              ${connSvg}
+              <span>${escHtml(connLabel)}</span>
+            </span>
+          </div>
+        </div>
+      `;
+    } else {
+      cardHtml = `
+        <div class="lobby-device-card is-offline" data-finish="${finish}">
+          <div class="lobby-card-top">
+            <div class="lobby-card-title">${escHtml(t.lobby.standbyTitle)}</div>
+            <div class="finish-dots">${finishDotsHtml}</div>
+          </div>
+
+          <div class="lobby-mouse-wrap">
+            <div class="lobby-mouse-halo" aria-hidden="true"></div>
+            <img class="lobby-mouse-img" src="assets/dragonfly3-top.png" alt="Dragonfly 3 Ultra" draggable="false"/>
+          </div>
+
+          <div style="width:100%;z-index:1;">
+            <p class="lobby-offline-desc">${escHtml(store.error || t.lobby.standbyDesc)}</p>
+            <div class="lobby-offline-actions">
+              <button id="lobby-retry" class="btn-primary">${escHtml(t.retryBtn)}</button>
+              <button id="lobby-demo" class="btn-secondary">${escHtml(t.tryDemo)}</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    stage.innerHTML = `
+      <div class="lobby-content">
+        ${cardHtml}
+        <div class="lobby-actions">
+          <button id="lobby-add-device" class="btn-lobby-add">${escHtml(t.lobby.addDevice)}</button>
+          <p class="lobby-bt-note">${escHtml(t.lobby.btNotice)}</p>
+        </div>
+      </div>
+    `;
+
+    stage.querySelectorAll("[data-finish-btn]").forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        setUiPrefs({ mouse_finish: btn.dataset.finishBtn });
+      };
+      btn.onkeydown = (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.stopPropagation();
+        }
+      };
+    });
+
+    const card = document.getElementById("lobby-device-card");
+    if (card) {
+      const enterEditor = () => {
+        store.view = "editor";
+        renderAll();
+      };
+      card.onclick = enterEditor;
+      card.onkeydown = (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          enterEditor();
+        }
+      };
+    }
+
+    const retryBtn = document.getElementById("lobby-retry");
+    if (retryBtn) retryBtn.onclick = boot;
+
+    const demoBtn = document.getElementById("lobby-demo");
+    if (demoBtn) {
+      demoBtn.onclick = async () => {
+        try {
+          const res = await rpc("enter_demo");
+          applyBundle(res);
+          showToast(tr().lobby.enterDemoToast);
+        } catch (err) {
+          showToast(tr().errorPrefix + err.message, true);
+        }
+      };
+    }
+
+    document.getElementById("lobby-add-device").onclick = openAddDeviceModal;
+  }
+
+  function renderWallpaperPopover() {
+    const pop = document.getElementById("wallpaper-popover");
+    if (!store.wallpaperOpen) {
+      pop.hidden = true;
+      return;
+    }
+
+    const t = tr();
+    const wp = getWallpaper();
+    const hasCustom = Boolean(wp.custom_url);
+    const thumbStyle = hasCustom ? `style="background-image:${cssUrl(wp.custom_url)}"` : "";
+
+    const presetsHtml = WALLPAPER_PRESETS.map((id) => {
+      const active = wp.mode === "preset" && wp.preset === id;
+      const name = t.wallpaper.presets[id] || id;
+      return `
+        <button type="button" class="wp-swatch ${active ? "is-active" : ""}" data-wp-preset="${id}">
+          <div class="wp-swatch-preview wp-preset-${id}">
+            <span class="wp-swatch-check">✓</span>
+          </div>
+          <div class="wp-swatch-name">${escHtml(name)}</div>
+        </button>
+      `;
+    }).join("");
+
+    pop.hidden = false;
+    pop.innerHTML = `
+      <div class="wp-popover-head">
+        <div class="wp-popover-title">${escHtml(t.wallpaper.title)}</div>
+        <button id="wp-close" class="wp-close-btn" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <div>
+        <div class="wp-section-label">${escHtml(t.wallpaper.customSection)}</div>
+        <div class="wp-custom-card">
+          <div class="wp-custom-row">
+            <div class="wp-custom-thumb" ${thumbStyle}>
+              ${hasCustom ? "" : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>`}
+            </div>
+            <div class="wp-custom-actions">
+              <button id="wp-choose-file" class="btn-primary" type="button">${escHtml(hasCustom ? t.wallpaper.changeImage : t.wallpaper.chooseImage)}</button>
+              ${hasCustom ? `<button id="wp-remove-file" class="btn-secondary" type="button">${escHtml(t.wallpaper.removeImage)}</button>` : ""}
+            </div>
+          </div>
+          <div class="wp-hint">${escHtml(t.wallpaper.customHint)}</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="wp-section-label">${escHtml(t.wallpaper.presetsSection)}</div>
+        <div class="wp-preset-grid">${presetsHtml}</div>
+      </div>
+
+      <div class="wp-slider-group">
+        <label class="wp-slider-row">
+          <div class="wp-slider-meta">
+            <span>${escHtml(t.wallpaper.blur)}</span>
+            <strong id="wp-blur-val">${wp.blur}px</strong>
+          </div>
+          <input id="wp-blur" class="range-slider" type="range" min="0" max="24" step="1" value="${wp.blur}"/>
+        </label>
+
+        <label class="wp-slider-row">
+          <div class="wp-slider-meta">
+            <span>${escHtml(t.wallpaper.dim)}</span>
+            <strong id="wp-dim-val">${wp.dim}%</strong>
+          </div>
+          <input id="wp-dim" class="range-slider" type="range" min="0" max="85" step="1" value="${wp.dim}"/>
+        </label>
+
+        <label class="wp-slider-row">
+          <div class="wp-slider-meta">
+            <span>${escHtml(t.wallpaper.opacity)}</span>
+            <strong id="wp-opacity-val">${wp.opacity}%</strong>
+          </div>
+          <input id="wp-opacity" class="range-slider" type="range" min="25" max="100" step="1" value="${wp.opacity}"/>
+        </label>
+      </div>
+
+      <div class="wp-toggle-row">
+        <span>${escHtml(t.wallpaper.watermark)}</span>
+        <label class="switch">
+          <input type="checkbox" id="wp-watermark" ${wp.watermark ? "checked" : ""}/>
+          <span class="switch-track"></span>
+        </label>
+      </div>
+
+      <button id="wp-reset" class="btn-secondary full-width" type="button">${escHtml(t.wallpaper.reset)}</button>
+    `;
+
+    document.getElementById("wp-close").onclick = () => {
+      store.wallpaperOpen = false;
+      renderChrome();
+      renderWallpaperPopover();
+    };
+
+    document.getElementById("wp-choose-file").onclick = async () => {
+      try {
+        const res = await rpc("choose_wallpaper_dialog");
+        if (res && !res.cancelled && res.config) {
+          store.config = res.config;
+          applyWallpaper();
+          renderWallpaperPopover();
+          showToast(tr().wallpaper.applied);
+        }
+      } catch (err) {
+        showToast(tr().errorPrefix + err.message, true);
+      }
+    };
+
+    const removeBtn = document.getElementById("wp-remove-file");
+    if (removeBtn) {
+      removeBtn.onclick = async () => {
+        try {
+          const res = await rpc("clear_custom_wallpaper");
+          if (res && res.config) store.config = res.config;
+          applyWallpaper();
+          renderWallpaperPopover();
+          showToast(tr().wallpaper.cleared);
+        } catch (err) {
+          showToast(tr().errorPrefix + err.message, true);
+        }
+      };
+    }
+
+    pop.querySelectorAll("[data-wp-preset]").forEach((btn) => {
+      btn.onclick = () => {
+        commitWallpaperPrefs({ mode: "preset", preset: btn.dataset.wpPreset }, true);
+        renderWallpaperPopover();
+      };
+    });
+
+    const bindSlider = (id, valId, key, unit) => {
+      const inp = document.getElementById(id);
+      const valEl = document.getElementById(valId);
+      inp.oninput = () => {
+        const num = Number(inp.value);
+        valEl.textContent = `${num}${unit}`;
+        commitWallpaperPrefs({ [key]: num }, false);
+      };
+      inp.onchange = () => {
+        commitWallpaperPrefs({ [key]: Number(inp.value) }, true);
+      };
+    };
+
+    bindSlider("wp-blur", "wp-blur-val", "blur", "px");
+    bindSlider("wp-dim", "wp-dim-val", "dim", "%");
+    bindSlider("wp-opacity", "wp-opacity-val", "opacity", "%");
+
+    document.getElementById("wp-watermark").onchange = (ev) => {
+      commitWallpaperPrefs({ watermark: ev.target.checked }, true);
+    };
+
+    document.getElementById("wp-reset").onclick = () => {
+      const cur = getWallpaper();
+      commitWallpaperPrefs(
+        {
+          mode: "preset",
+          preset: DEFAULT_WALLPAPER.preset,
+          custom_path: cur.custom_path || "",
+          custom_url: cur.custom_url || "",
+          blur: DEFAULT_WALLPAPER.blur,
+          dim: DEFAULT_WALLPAPER.dim,
+          opacity: DEFAULT_WALLPAPER.opacity,
+          watermark: DEFAULT_WALLPAPER.watermark,
+        },
+        true
+      );
+      renderWallpaperPopover();
+      showToast(tr().wallpaper.applied);
+    };
+  }
+
+  function renderAddDeviceModal() {
+    const backdrop = document.getElementById("add-device-backdrop");
+    const card = document.getElementById("add-device-card");
+    if (!store.addDeviceOpen) {
+      backdrop.hidden = true;
+      return;
+    }
+
+    const t = tr();
+    const m = t.addDeviceModal;
+    const devices = Array.isArray(store.devices) ? store.devices : [];
+    const activePath = store.connected && store.state && !store.state.is_demo ? store.state.hidraw_path : "";
+
+    let listHtml = "";
+    if (store.scanningDevices) {
+      listHtml = `
+        <div class="loading-box" style="padding:24px 10px;">
+          <div class="spinner"></div>
+          <p style="color:var(--text-muted);">${escHtml(m.scanning)}</p>
+        </div>
+      `;
+    } else if (devices.length) {
+      listHtml = `
+        <div class="scan-device-list">
+          ${devices
+            .map((d) => {
+              const title = d.model_name || d.name || "VGN Mouse";
+              const modeStr = d.is_wireless ? t.wirelessMode : t.wiredMode;
+              const isActive = activePath && activePath === d.path;
+              const actionBtn = !d.accessible
+                ? `<span class="pill pill-err">${escHtml(m.noPermission)}</span>`
+                : isActive
+                  ? `<span class="pill pill-ok">${escHtml(m.active)}</span>`
+                  : `<button class="btn-primary" type="button" data-connect-path="${escHtml(d.path)}">${escHtml(m.connect)}</button>`;
+              return `
+                <div class="scan-device-row">
+                  <div class="scan-device-info">
+                    <div class="scan-device-name">${escHtml(title)}</div>
+                    <div class="scan-device-meta">${escHtml(d.vid_pid)} · ${escHtml(d.path)} · ${escHtml(modeStr)}${d.sensor ? ` · ${escHtml(d.sensor)}` : ""}</div>
+                    ${!d.accessible && d.error ? `<div class="scan-device-meta" style="color:#fda4af;">${escHtml(d.error)}</div>` : ""}
+                  </div>
+                  ${actionBtn}
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      `;
+    } else {
+      listHtml = `
+        <div style="padding:18px 14px;border-radius:var(--radius-md);border:1px dashed var(--border-subtle);text-align:center;">
+          <div style="font-weight:700;margin-bottom:4px;">${escHtml(m.emptyTitle)}</div>
+          <p style="margin-bottom:12px;">${escHtml(m.emptyDesc)}</p>
+          <button id="scan-enter-demo" class="btn-secondary" type="button">${escHtml(m.tryDemo)}</button>
+        </div>
+      `;
+    }
+
+    const udevNotice = !store.catalog.udev_rule_installed
+      ? `<div class="pill pill-err" style="border-radius:10px;padding:8px 12px;line-height:1.4;">${escHtml(m.udevTip)}</div>`
+      : "";
+
+    const supportedHtml = (store.catalog.supported_models || [])
+      .map((model) => `<span class="supported-chip">${escHtml(model.name)} (${escHtml(model.sensor)})</span>`)
+      .join("");
+
+    backdrop.hidden = false;
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <h3>${escHtml(m.title)}</h3>
+          <p>${escHtml(m.subtitle)}</p>
+        </div>
+        <button id="scan-close-x" class="wp-close-btn" type="button" aria-label="Close">✕</button>
+      </div>
+
+      ${listHtml}
+      ${udevNotice}
+
+      <div>
+        <div class="wp-section-label">${escHtml(m.supportedTitle)}</div>
+        <div class="supported-chips">${supportedHtml}</div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="scan-rescan" class="btn-secondary" type="button" ${store.scanningDevices ? "disabled" : ""}>${escHtml(m.rescan)}</button>
+        <button id="scan-close" class="btn-primary" type="button">${escHtml(m.close)}</button>
+      </div>
+    `;
+
+    const closeModal = () => {
+      store.addDeviceOpen = false;
+      renderAddDeviceModal();
+    };
+
+    document.getElementById("scan-close-x").onclick = closeModal;
+    document.getElementById("scan-close").onclick = closeModal;
+    document.getElementById("scan-rescan").onclick = openAddDeviceModal;
+
+    const demoBtn = document.getElementById("scan-enter-demo");
+    if (demoBtn) {
+      demoBtn.onclick = async () => {
+        try {
+          const bundle = await rpc("enter_demo");
+          store.addDeviceOpen = false;
+          renderAddDeviceModal();
+          applyBundle(bundle);
+          showToast(tr().lobby.enterDemoToast);
+        } catch (err) {
+          showToast(tr().errorPrefix + err.message, true);
+        }
+      };
+    }
+
+    card.querySelectorAll("[data-connect-path]").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          const bundle = await rpc("connect_real", { device_path: btn.dataset.connectPath });
+          store.addDeviceOpen = false;
+          renderAddDeviceModal();
+          applyBundle(bundle);
+        } catch (err) {
+          showToast(tr().errorPrefix + err.message, true);
+        }
+      };
+    });
+  }
+
+  async function openAddDeviceModal() {
+    store.addDeviceOpen = true;
+    store.scanningDevices = true;
+    renderAddDeviceModal();
+    try {
+      const res = await rpc("scan_devices");
+      if (Array.isArray(res?.devices)) store.devices = res.devices;
+      if (typeof res?.udev_rule_installed === "boolean") {
+        store.catalog.udev_rule_installed = res.udev_rule_installed;
+      }
+    } catch (err) {
+      showToast(tr().errorPrefix + err.message, true);
+    } finally {
+      store.scanningDevices = false;
+      if (store.addDeviceOpen) renderAddDeviceModal();
     }
   }
 
@@ -1152,6 +1713,7 @@
             <button class="choice-btn ${store.config.theme === "solid" ? "is-active" : ""}" data-set-theme="solid">${t.system.solidLabel}</button>
             <button class="choice-btn ${store.config.lang === "vi" ? "is-active" : ""}" data-set-lang="vi">Tiếng Việt</button>
             <button class="choice-btn ${store.config.lang === "en" ? "is-active" : ""}" data-set-lang="en">English</button>
+            <button id="sys-wallpaper" class="choice-btn">${t.system.wallpaperBtn}</button>
           </div>
         </section>
       </div>
@@ -1221,6 +1783,15 @@
     stage.querySelectorAll("[data-set-lang]").forEach((b) => {
       b.onclick = () => setUiPrefs({ lang: b.dataset.setLang });
     });
+    const sysWpBtn = document.getElementById("sys-wallpaper");
+    if (sysWpBtn) {
+      sysWpBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        store.wallpaperOpen = true;
+        renderChrome();
+        renderWallpaperPopover();
+      };
+    }
 
     document.getElementById("sys-factory").onclick = () => {
       openConfirm(t.restoreConfirmTitle, t.restoreConfirmBody, () => mutate("restore_factory"));
@@ -1250,7 +1821,14 @@
 
   function renderAll() {
     renderChrome();
-    renderStage();
+    if (store.view === "lobby") {
+      renderLobby();
+    } else {
+      renderStage();
+    }
+    if (store.wallpaperOpen) {
+      renderWallpaperPopover();
+    }
   }
 
   async function setUiPrefs(prefs) {
@@ -1265,6 +1843,7 @@
     store.connected = Boolean(bundle.connected);
     store.error = bundle.error || "";
     store.state = bundle.state || null;
+    if (Array.isArray(bundle.devices)) store.devices = bundle.devices;
     if (bundle.config) store.config = bundle.config;
     if (bundle.catalog) store.catalog = bundle.catalog;
     renderAll();
@@ -1281,7 +1860,77 @@
     }
   }
 
+  const returnToLobby = () => {
+    if (store.view === "lobby") return;
+    store.isRecording = false;
+    store.view = "lobby";
+    renderAll();
+  };
+
+  document.getElementById("btn-back-lobby").onclick = returnToLobby;
+
+  const brandHome = document.getElementById("brand-home");
+  brandHome.onclick = () => {
+    if (store.view === "editor") returnToLobby();
+  };
+  brandHome.onkeydown = (ev) => {
+    if (store.view === "editor" && (ev.key === "Enter" || ev.key === " ")) {
+      ev.preventDefault();
+      returnToLobby();
+    }
+  };
+
+  document.getElementById("btn-wallpaper").onclick = (ev) => {
+    ev.stopPropagation();
+    store.wallpaperOpen = !store.wallpaperOpen;
+    renderChrome();
+    renderWallpaperPopover();
+  };
+
+  document.getElementById("wallpaper-popover").onclick = (ev) => {
+    ev.stopPropagation();
+  };
+
+  document.getElementById("add-device-backdrop").onclick = (ev) => {
+    if (ev.target.id === "add-device-backdrop") {
+      store.addDeviceOpen = false;
+      renderAddDeviceModal();
+    }
+  };
+
+  document.addEventListener("click", (ev) => {
+    if (!store.wallpaperOpen) return;
+    const pop = document.getElementById("wallpaper-popover");
+    const trigger = document.getElementById("btn-wallpaper");
+    if (!pop.contains(ev.target) && !trigger.contains(ev.target)) {
+      store.wallpaperOpen = false;
+      renderChrome();
+      renderWallpaperPopover();
+    }
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || store.isRecording) return;
+    let handled = false;
+    if (store.wallpaperOpen) {
+      store.wallpaperOpen = false;
+      renderChrome();
+      renderWallpaperPopover();
+      handled = true;
+    }
+    if (store.addDeviceOpen) {
+      store.addDeviceOpen = false;
+      renderAddDeviceModal();
+      handled = true;
+    }
+    if (handled) ev.preventDefault();
+  });
+
   document.getElementById("btn-refresh").onclick = async () => {
+    if (!store.connected) {
+      await boot();
+      return;
+    }
     try {
       const bundle = await rpc("refresh");
       applyBundle(bundle);
