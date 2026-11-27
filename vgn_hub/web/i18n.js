@@ -33,9 +33,9 @@ window.VGN_I18N = {
       editingSlot: "Đang chọn nút",
       searchPlaceholder: "Tìm chức năng...",
       tabs: {
-        system: "Chức năng chuột & DPI",
-        keyboard: "Tổ hợp bàn phím",
-        media: "Đa phương tiện & Hệ thống",
+        system: "Chuột & DPI",
+        keyboard: "Tổ hợp phím",
+        media: "Media & Hệ thống",
         macros: "Macro",
       },
       catMouse: "Nút chuột",

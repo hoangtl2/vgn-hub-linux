@@ -408,20 +408,20 @@
         <button id="btn-restore-default" class="ghost-btn">${t.restoreDefault}</button>
       </section>
 
-      <section class="card">
-        <div class="palette-header">
-          <div>
-            <div class="card-title">${t.keybinding.editingSlot}: <span style="color:#60a5fa">${lang === "vi" ? activeBtn.label_vi : activeBtn.label_en}</span></div>
-            <div style="font-size:11.5px;color:var(--text-muted);">${t.keybinding.hint}</div>
+      <section class="stage-lower binding-panel">
+        <div class="palette-toolbar">
+          <div class="tab-strip">
+            ${["system", "keyboard", "media", "macros"]
+              .map((k) => `<button class="tab-btn ${store.keyTab === k ? "is-active" : ""}" data-ktab="${k}">${t.keybinding.tabs[k]}</button>`)
+              .join("")}
           </div>
           <input id="key-search" class="search-input" type="search" value="${escHtml(store.keySearch)}" placeholder="${t.keybinding.searchPlaceholder}" />
         </div>
-        <div class="tab-strip" style="margin-bottom:14px;">
-          ${["system", "keyboard", "media", "macros"]
-            .map((k) => `<button class="tab-btn ${store.keyTab === k ? "is-active" : ""}" data-ktab="${k}">${t.keybinding.tabs[k]}</button>`)
-            .join("")}
+        <div class="palette-meta">
+          <span class="palette-slot-label">${t.keybinding.editingSlot}: <strong class="palette-slot-accent">${lang === "vi" ? activeBtn.label_vi : activeBtn.label_en}</strong></span>
+          <span class="palette-hint">${t.keybinding.hint}</span>
         </div>
-        ${paletteBody}
+        <div class="action-groups">${paletteBody}</div>
       </section>
     `;
 
@@ -522,64 +522,66 @@
         ${window.VgnMouseSvg.renderBottom({ ledColor: active.color })}
       </section>
 
-      <div class="dpi-grid">
-        <section class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div class="card-title" style="margin:0;">${t.dpi.levels} ${s.dpi_stages.length}/${s.max_dpi_stages}</div>
-            <div style="display:flex;gap:6px;">
-              <button id="dpi-rem" class="seg-btn" ${s.dpi_stages.length <= 1 ? "disabled" : ""}>-</button>
-              <button id="dpi-add" class="seg-btn" ${s.dpi_stages.length >= s.max_dpi_stages ? "disabled" : ""}>+</button>
+      <section class="stage-lower">
+        <div class="dpi-grid">
+          <section class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <div class="card-title" style="margin:0;">${t.dpi.levels} ${s.dpi_stages.length}/${s.max_dpi_stages}</div>
+              <div style="display:flex;gap:6px;">
+                <button id="dpi-rem" class="seg-btn" ${s.dpi_stages.length <= 1 ? "disabled" : ""}>-</button>
+                <button id="dpi-add" class="seg-btn" ${s.dpi_stages.length >= s.max_dpi_stages ? "disabled" : ""}>+</button>
+              </div>
             </div>
-          </div>
-          <div class="dpi-stage-list">${rowsHtml}</div>
-        </section>
+            <div class="dpi-stage-list">${rowsHtml}</div>
+          </section>
 
-        <section class="card">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-            <div>
-              <div class="card-title">${t.dpi.settingsTitle} (DPI ${s.active_dpi + 1})</div>
-              <div class="card-sub">${t.dpi.settingsSub}</div>
+          <section class="card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+              <div>
+                <div class="card-title">${t.dpi.settingsTitle} (DPI ${s.active_dpi + 1})</div>
+                <div class="card-sub">${t.dpi.settingsSub}</div>
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;">
+                <span>${t.dpi.splitXY}</span>
+                <span class="switch">
+                  <input type="checkbox" id="xy-toggle" ${isSplit ? "checked" : ""}/>
+                  <span class="switch-track"></span>
+                </span>
+              </label>
             </div>
-            <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;">
-              <span>${t.dpi.splitXY}</span>
-              <span class="switch">
-                <input type="checkbox" id="xy-toggle" ${isSplit ? "checked" : ""}/>
-                <span class="switch-track"></span>
-              </span>
-            </label>
-          </div>
 
-          <div style="margin-top:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <span style="font-weight:600;">${isSplit ? t.dpi.axisX : t.dpi.axisXY}</span>
-              <input id="dpi-x-num" class="num-input" type="number" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.x}" style="width:100px;text-align:right;font-weight:700;"/>
+            <div style="margin-top:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-weight:600;">${isSplit ? t.dpi.axisX : t.dpi.axisXY}</span>
+                <input id="dpi-x-num" class="num-input" type="number" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.x}" style="width:100px;text-align:right;font-weight:700;"/>
+              </div>
+              <input id="dpi-x-slider" class="range-slider" type="range" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.x}"/>
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-dim);margin-top:4px;">
+                <span>${s.dpi_min}</span><span>10500</span><span>21000</span><span>31500</span><span>${s.dpi_max}</span>
+              </div>
             </div>
-            <input id="dpi-x-slider" class="range-slider" type="range" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.x}"/>
-            <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-dim);margin-top:4px;">
-              <span>${s.dpi_min}</span><span>10500</span><span>21000</span><span>31500</span><span>${s.dpi_max}</span>
+
+            ${
+              isSplit
+                ? `<div style="margin-top:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                      <span style="font-weight:600;">${t.dpi.axisY}</span>
+                      <input id="dpi-y-num" class="num-input" type="number" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.y}" style="width:100px;text-align:right;font-weight:700;"/>
+                    </div>
+                    <input id="dpi-y-slider" class="range-slider" type="range" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.y}"/>
+                  </div>`
+                : ""
+            }
+
+            <div class="cat-heading" style="margin-top:16px;">${t.dpi.presets}</div>
+            <div class="preset-row">
+              ${[400, 800, 1600, 3200, 6400]
+                .map((v) => `<button class="choice-btn ${active.x === v ? "is-active" : ""}" data-preset="${v}">${v}</button>`)
+                .join("")}
             </div>
-          </div>
-
-          ${
-            isSplit
-              ? `<div style="margin-top:14px;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                    <span style="font-weight:600;">${t.dpi.axisY}</span>
-                    <input id="dpi-y-num" class="num-input" type="number" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.y}" style="width:100px;text-align:right;font-weight:700;"/>
-                  </div>
-                  <input id="dpi-y-slider" class="range-slider" type="range" min="${s.dpi_min}" max="${s.dpi_max}" step="${s.dpi_step}" value="${active.y}"/>
-                </div>`
-              : ""
-          }
-
-          <div class="cat-heading" style="margin-top:16px;">${t.dpi.presets}</div>
-          <div class="preset-row">
-            ${[400, 800, 1600, 3200, 6400]
-              .map((v) => `<button class="choice-btn ${active.x === v ? "is-active" : ""}" data-preset="${v}">${v}</button>`)
-              .join("")}
-          </div>
-        </section>
-      </div>
+          </section>
+        </div>
+      </section>
     `;
 
     stage.querySelectorAll("[data-dpi-row]").forEach((row) => {
@@ -661,41 +663,43 @@
         ${window.VgnMouseSvg.renderTop({ ledColor: activeLedColor(), compact: false })}
       </section>
 
-      <div class="perf-grid">
-        <section class="card">
-          <div class="card-title">${t.perf.pollingTitle}</div>
-          <div class="card-sub">${t.perf.pollingDesc}</div>
-          <div class="polling-bars">
-            ${rates
-              .map(
-                (hz) => `
-              <button class="poll-bar ${s.polling_hz === hz ? "is-active" : ""}"
-                      style="height:${POLLING_HEIGHTS[hz] || 55}%"
-                      data-hz="${hz}">${hz}Hz</button>`
-              )
-              .join("")}
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);">
-            <span>${t.perf.pollingLow}</span>
-            <span>${t.perf.pollingHigh}</span>
-          </div>
-        </section>
+      <section class="stage-lower">
+        <div class="perf-grid">
+          <section class="card">
+            <div class="card-title">${t.perf.pollingTitle}</div>
+            <div class="card-sub">${t.perf.pollingDesc}</div>
+            <div class="polling-bars">
+              ${rates
+                .map(
+                  (hz) => `
+                <button class="poll-bar ${s.polling_hz === hz ? "is-active" : ""}"
+                        style="height:${POLLING_HEIGHTS[hz] || 55}%"
+                        data-hz="${hz}">${hz}Hz</button>`
+                )
+                .join("")}
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);">
+              <span>${t.perf.pollingLow}</span>
+              <span>${t.perf.pollingHigh}</span>
+            </div>
+          </section>
 
-        <section class="card">
-          <div class="card-title">${t.perf.samplingTitle}</div>
-          <div class="card-sub">${t.perf.samplingDesc}</div>
-          <div class="sampling-cards">
-            <button class="mode-card ${s.fps_mode === 0 ? "is-active" : ""}" data-fps="0">
-              <div class="mode-card-title">${t.perf.basicTitle}</div>
-              <div class="mode-card-desc">${t.perf.basicDesc}</div>
-            </button>
-            <button class="mode-card ${s.fps_mode === 1 ? "is-active" : ""}" data-fps="1">
-              <div class="mode-card-title">${t.perf.supremeTitle}</div>
-              <div class="mode-card-desc">${t.perf.supremeDesc}</div>
-            </button>
-          </div>
-        </section>
-      </div>
+          <section class="card">
+            <div class="card-title">${t.perf.samplingTitle}</div>
+            <div class="card-sub">${t.perf.samplingDesc}</div>
+            <div class="sampling-cards">
+              <button class="mode-card ${s.fps_mode === 0 ? "is-active" : ""}" data-fps="0">
+                <div class="mode-card-title">${t.perf.basicTitle}</div>
+                <div class="mode-card-desc">${t.perf.basicDesc}</div>
+              </button>
+              <button class="mode-card ${s.fps_mode === 1 ? "is-active" : ""}" data-fps="1">
+                <div class="mode-card-title">${t.perf.supremeTitle}</div>
+                <div class="mode-card-desc">${t.perf.supremeDesc}</div>
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
     `;
 
     stage.querySelectorAll("[data-hz]").forEach((b) => {
@@ -911,7 +915,7 @@
         ${window.VgnMouseSvg.renderTop({ ledColor: activeLedColor(), compact: false })}
       </section>
 
-      <section class="card rotation-card">
+      <section class="stage-lower rotation-panel">
         <div class="rotation-header">
           <span class="tab-btn is-active rotation-pill">${t.nav.rotation}</span>
           <div class="rotation-sub">${t.rotation.desc}</div>
@@ -1224,10 +1228,14 @@
   }
 
   function renderStage() {
+    const stage = document.getElementById("main-stage");
     if (!store.connected || !store.state) {
+      stage.classList.remove("stage-split");
       renderDisconnected();
       return;
     }
+    const isSplit = ["keys", "dpi", "performance", "rotation"].includes(store.page);
+    stage.classList.toggle("stage-split", isSplit);
     const views = {
       keys: renderKeysPage,
       dpi: renderDpiPage,
