@@ -67,7 +67,6 @@
     blur: 0,
     dim: 28,
     opacity: 88,
-    watermark: true,
   };
 
   const store = {
@@ -234,7 +233,6 @@
     wp.blur = Math.max(0, Math.min(24, Number(wp.blur) || 0));
     wp.dim = Math.max(0, Math.min(85, Number(wp.dim ?? DEFAULT_WALLPAPER.dim)));
     wp.opacity = Math.max(25, Math.min(100, Number(wp.opacity ?? DEFAULT_WALLPAPER.opacity)));
-    wp.watermark = wp.watermark !== false;
     return wp;
   }
 
@@ -247,7 +245,6 @@
 
     const presetLayer = document.getElementById("bg-preset-layer");
     const customLayer = document.getElementById("bg-custom-layer");
-    const watermarkLayer = document.getElementById("bg-watermark-layer");
     const swatchEl = document.getElementById("wp-trigger-swatch");
 
     if (presetLayer) {
@@ -258,9 +255,6 @@
       const hasCustom = wp.mode === "custom" && Boolean(wp.custom_url);
       customLayer.hidden = !hasCustom;
       customLayer.style.backgroundImage = hasCustom ? cssUrl(wp.custom_url) : "";
-    }
-    if (watermarkLayer) {
-      watermarkLayer.hidden = !wp.watermark;
     }
     if (swatchEl) {
       if (wp.mode === "custom" && wp.custom_url) {
@@ -603,14 +597,6 @@
         </label>
       </div>
 
-      <div class="wp-toggle-row">
-        <span>${escHtml(t.wallpaper.watermark)}</span>
-        <label class="switch">
-          <input type="checkbox" id="wp-watermark" ${wp.watermark ? "checked" : ""}/>
-          <span class="switch-track"></span>
-        </label>
-      </div>
-
       <button id="wp-reset" class="btn-secondary full-width" type="button">${escHtml(t.wallpaper.reset)}</button>
     `;
 
@@ -673,10 +659,6 @@
     bindSlider("wp-dim", "wp-dim-val", "dim", "%");
     bindSlider("wp-opacity", "wp-opacity-val", "opacity", "%");
 
-    document.getElementById("wp-watermark").onchange = (ev) => {
-      commitWallpaperPrefs({ watermark: ev.target.checked }, true);
-    };
-
     document.getElementById("wp-reset").onclick = () => {
       const cur = getWallpaper();
       commitWallpaperPrefs(
@@ -688,7 +670,6 @@
           blur: DEFAULT_WALLPAPER.blur,
           dim: DEFAULT_WALLPAPER.dim,
           opacity: DEFAULT_WALLPAPER.opacity,
-          watermark: DEFAULT_WALLPAPER.watermark,
         },
         true
       );

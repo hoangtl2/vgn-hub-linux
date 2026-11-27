@@ -72,8 +72,7 @@ body.theme-solid .bg-ambient {
 }
 
 .bg-preset-layer[hidden],
-.bg-custom-layer[hidden],
-.bg-watermark-layer[hidden] {
+.bg-custom-layer[hidden] {
   display: none;
 }
 
@@ -141,29 +140,6 @@ body.view-editor .bg-dim-layer {
   background:
     radial-gradient(ellipse at 50% 15%, rgba(255, 255, 255, 0.07) 0%, transparent 55%),
     linear-gradient(160deg, #1a1b23 0%, #13141b 55%, #0e0f14 100%);
-}
-
-.bg-watermark-layer {
-  position: absolute;
-  left: 50%;
-  top: 47%;
-  transform: translate(-50%, -50%) rotate(-10deg);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 0.92;
-  font-size: clamp(78px, 11vw, 146px);
-  font-weight: 900;
-  letter-spacing: 10px;
-  color: rgba(255, 255, 255, 0.055);
-  pointer-events: none;
-  white-space: nowrap;
-  user-select: none;
-  transition: color 0.25s ease;
-}
-
-body.view-editor .bg-watermark-layer {
-  color: rgba(255, 255, 255, 0.024);
 }
 
 .app-shell {
@@ -2023,15 +1999,6 @@ body.view-editor .workspace {
 .wp-slider-meta strong {
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
-}
-
-.wp-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text-main);
 }
 
 /* Add Device Scanner Modal */

@@ -76,7 +76,6 @@ def _default_wallpaper() -> dict[str, Any]:
         "blur": 0,
         "dim": 28,
         "opacity": 88,
-        "watermark": True,
     }
 
 
@@ -106,8 +105,6 @@ def _normalize_wallpaper(raw: Any, fallback: dict[str, Any] | None = None) -> di
             wp["dim"] = _clamp_int(raw.get("dim"), 0, 85, int(wp.get("dim", 28)))
         if "opacity" in raw:
             wp["opacity"] = _clamp_int(raw.get("opacity"), 25, 100, int(wp.get("opacity", 88)))
-        if "watermark" in raw:
-            wp["watermark"] = bool(raw.get("watermark"))
 
     if wp.get("preset") not in WALLPAPER_PRESET_IDS:
         wp["preset"] = "vgn-crimson"

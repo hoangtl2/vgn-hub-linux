@@ -25,7 +25,6 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
         self.assertEqual(wp["blur"], 0)
         self.assertEqual(wp["dim"], 28)
         self.assertEqual(wp["opacity"], 88)
-        self.assertTrue(wp["watermark"])
         self.assertEqual(wp["custom_path"], "")
         self.assertEqual(wp["custom_url"], "")
 
@@ -68,7 +67,6 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
                     "blur": 999,
                     "dim": -10,
                     "opacity": 5,
-                    "watermark": False,
                 }
             )
             self.assertEqual(norm["mode"], "custom")
@@ -76,7 +74,6 @@ class TestGuiConfigAndWallpaper(unittest.TestCase):
             self.assertEqual(norm["blur"], 24)
             self.assertEqual(norm["dim"], 0)
             self.assertEqual(norm["opacity"], 25)
-            self.assertFalse(norm["watermark"])
             self.assertTrue(norm["custom_url"].startswith("file://"))
             self.assertIn("?v=", norm["custom_url"])
 
