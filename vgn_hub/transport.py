@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import os
 import select
@@ -9,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Iterator, Protocol
 
 from .registry import DeviceSpec, find_device_spec
 
@@ -272,8 +273,63 @@ class FeatureHidTransport:
         self._info: HidDeviceInfo | None = None
         self._fd: int | None = None
         self._lock = threading.Lock()
+        self._tx_lock = threading.RLock()
+        self._tx_depth = 0
+        self._flock_fd: int | None = None
         self._event_stop = threading.Event()
         self._event_thread: threading.Thread | None = None
+
+    def _lock_file_path(self) -> Path | None:
+        dev_path = self._info.path if self._info else self._requested_path
+        if not dev_path:
+            return None
+        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+        return runtime_dir / f"vgn-hub-{Path(dev_path).name}.lock"
+
+    def _acquire_flock(self) -> None:
+        lock_path = self._lock_file_path()
+        if lock_path is None or self._flock_fd is not None:
+            return
+        fd: int | None = None
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._flock_fd = fd
+        except OSError:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            self._flock_fd = None
+
+    def _release_flock(self) -> None:
+        fd = self._flock_fd
+        self._flock_fd = None
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    @contextlib.contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Serialize multi-packet HID transactions across threads and processes."""
+        with self._tx_lock:
+            if self._tx_depth == 0:
+                self._acquire_flock()
+            self._tx_depth += 1
+            try:
+                yield
+            finally:
+                self._tx_depth -= 1
+                if self._tx_depth == 0:
+                    self._release_flock()
 
     @property
     def info(self) -> HidDeviceInfo | None:
@@ -341,6 +397,9 @@ class FeatureHidTransport:
         self.stop_event_listener()
         with self._lock:
             self._close_locked()
+        with self._tx_lock:
+            if self._tx_depth == 0:
+                self._release_flock()
 
     def _close_locked(self) -> None:
         if self._fd is not None:

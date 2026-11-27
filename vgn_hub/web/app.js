@@ -59,6 +59,7 @@
     "pure-minimal",
   ];
   const MOUSE_FINISHES = ["obsidian", "frost", "sakura", "sunset"];
+  const DEFAULT_DPI_COLORS = ["#ff0000", "#0000ff", "#00ff00", "#ffff00", "#00ffff", "#7d00ff"];
   const DEFAULT_WALLPAPER = {
     mode: "preset",
     preset: "vgn-crimson",
@@ -102,6 +103,9 @@
   let nextReqId = 1;
   let rotCommitTimer = null;
   let wpCommitTimer = null;
+  let dpiSelectTimer = null;
+  let pendingDpiStage = null;
+  let dpiReqSeq = 0;
   const pending = new Map();
 
   function rpc(action, params = {}) {
@@ -359,22 +363,36 @@
     });
 
     // Right Profile list & Telemetry
+    renderRightPanel();
+  }
+
+  function renderRightPanel() {
+    const t = tr();
     const profList = document.getElementById("profile-list");
     const telGrid = document.getElementById("telemetry-grid");
     if (store.connected && store.state) {
       const s = store.state;
+      const led = activeLedColor();
+      const ledOff = !led || led.toLowerCase() === "#000000";
+      const ledDotStyle = ledOff
+        ? "background:#111;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.45)"
+        : `background:${led}`;
       profList.innerHTML = Array.from({ length: s.profile_count }, (_, i) => `
         <button class="profile-btn ${s.profile === i ? "is-active" : ""}" data-profile="${i}">
           <span>${t.profileItem} ${i + 1}</span>
-          ${s.profile === i ? `<span class="dot" style="background:${activeLedColor()}"></span>` : ""}
+          ${s.profile === i ? `<span class="dot" style="${ledDotStyle}"></span>` : ""}
         </button>`).join("");
       profList.querySelectorAll("[data-profile]").forEach((b) => {
         b.onclick = () => mutate("set_profile", { profile: Number(b.dataset.profile) });
       });
 
       const curDpi = s.dpi_stages[s.active_dpi] || { x: 0, y: 0, color: "#fff" };
+      const curOff = !curDpi.color || curDpi.color.toLowerCase() === "#000000";
+      const curDotStyle = curOff
+        ? "background:#111;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.45)"
+        : `background:${curDpi.color}`;
       telGrid.innerHTML = `
-        <div class="tel-row"><span class="tel-k">${t.tel.activeDpi}</span><span class="tel-v"><span class="dot" style="background:${curDpi.color}"></span>${curDpi.x}</span></div>
+        <div class="tel-row"><span class="tel-k">${t.tel.activeDpi}</span><span class="tel-v"><span class="dot" style="${curDotStyle}"></span>${curDpi.x}</span></div>
         <div class="tel-row"><span class="tel-k">${t.tel.polling}</span><span class="tel-v">${s.polling_hz} Hz</span></div>
         <div class="tel-row"><span class="tel-k">${t.tel.lod}</span><span class="tel-v">${s.lod_mm}</span></div>
         <div class="tel-row"><span class="tel-k">${t.tel.debounce}</span><span class="tel-v">${s.debounce_ms} ms</span></div>
@@ -1041,24 +1059,57 @@
     };
   }
 
+  function syncDpiVisuals() {
+    renderRightPanel();
+    if (store.view === "editor" && store.page === "dpi") {
+      renderDpiPage();
+    }
+  }
+
+  async function runDpiMutation(action, params, flushPendingStage = false) {
+    const seq = ++dpiReqSeq;
+    try {
+      if (flushPendingStage && pendingDpiStage !== null) {
+        const st = pendingDpiStage;
+        clearTimeout(dpiSelectTimer);
+        pendingDpiStage = null;
+        await rpc("set_current_dpi", { stage: st });
+      }
+      const res = await rpc(action, params);
+      if (seq === dpiReqSeq && res?.state) {
+        store.state = res.state;
+        syncDpiVisuals();
+      }
+      showToast(tr().saved);
+    } catch (err) {
+      showToast(tr().errorPrefix + err.message, true);
+      try {
+        const bundle = await rpc("refresh");
+        applyBundle(bundle);
+      } catch (_) {}
+    }
+  }
+
   function renderDpiPage() {
     const t = tr();
     const s = store.state;
     const stage = document.getElementById("main-stage");
     const active = s.dpi_stages[s.active_dpi] || s.dpi_stages[0];
     const isSplit = store.xySplit || active.x !== active.y;
+    const allOff = s.dpi_stages.every((st) => !st.color || st.color.toLowerCase() === "#000000");
 
     const rowsHtml = s.dpi_stages
-      .map(
-        (st, idx) => `
+      .map((st, idx) => {
+        const isOff = !st.color || st.color.toLowerCase() === "#000000";
+        return `
       <div class="dpi-stage-row ${idx === s.active_dpi ? "is-active" : ""}" data-dpi-row="${idx}">
-        <div class="color-input-wrap" title="${t.dpi.colorLabel}">
-          <input type="color" value="${st.color}" data-dpi-color="${idx}"/>
+        <div class="color-input-wrap ${isOff ? "is-off" : ""}" style="background:${escHtml(st.color)}" title="${escHtml(isOff ? t.dpi.colorOff : t.dpi.colorLabel)}">
+          <input type="color" value="${escHtml(st.color)}" data-dpi-color="${idx}"/>
         </div>
         <span class="dpi-stage-name">DPI ${idx + 1}</span>
         <span class="dpi-stage-val">${st.x === st.y ? st.x : `${st.x} / ${st.y}`}</span>
-      </div>`
-      )
+      </div>`;
+      })
       .join("");
 
     stage.innerHTML = `
@@ -1077,6 +1128,7 @@
               </div>
             </div>
             <div class="dpi-stage-list">${rowsHtml}</div>
+            <button id="dpi-reset-colors" class="ghost-btn dpi-reset-colors-btn ${allOff ? "is-highlight" : ""}" type="button">${escHtml(t.dpi.resetColors)}</button>
           </section>
 
           <section class="card">
@@ -1130,35 +1182,89 @@
 
     stage.querySelectorAll("[data-dpi-row]").forEach((row) => {
       row.onclick = (ev) => {
-        if (ev.target.tagName === "INPUT") return;
+        if (ev.target.closest(".color-input-wrap")) return;
+        const nextIdx = Number(row.dataset.dpiRow);
+        if (nextIdx === store.state.active_dpi) return;
         store.xySplit = false;
-        mutate("set_current_dpi", { stage: Number(row.dataset.dpiRow) });
+        store.state.active_dpi = nextIdx;
+        syncDpiVisuals();
+        pendingDpiStage = nextIdx;
+        clearTimeout(dpiSelectTimer);
+        dpiSelectTimer = setTimeout(() => {
+          pendingDpiStage = null;
+          runDpiMutation("set_current_dpi", { stage: nextIdx });
+        }, 40);
       };
     });
 
     stage.querySelectorAll("[data-dpi-color]").forEach((inp) => {
+      inp.onclick = (ev) => ev.stopPropagation();
+      inp.oninput = () => {
+        const wrap = inp.closest(".color-input-wrap");
+        if (wrap) {
+          wrap.style.background = inp.value;
+          wrap.classList.toggle("is-off", inp.value.toLowerCase() === "#000000");
+        }
+      };
       inp.onchange = () => {
-        mutate("set_dpi_color", { stage: Number(inp.dataset.dpiColor), color: inp.value });
+        const idx = Number(inp.dataset.dpiColor);
+        const color = inp.value;
+        if (store.state.dpi_stages[idx]) {
+          store.state.dpi_stages[idx].color = color;
+        }
+        syncDpiVisuals();
+        runDpiMutation("set_dpi_color", { stage: idx, color });
       };
     });
 
+    document.getElementById("dpi-reset-colors").onclick = () => {
+      clearTimeout(dpiSelectTimer);
+      pendingDpiStage = null;
+      const next = store.state.dpi_stages.map((st, idx) => ({
+        ...st,
+        color: DEFAULT_DPI_COLORS[idx % DEFAULT_DPI_COLORS.length],
+      }));
+      store.state.dpi_stages = next;
+      syncDpiVisuals();
+      runDpiMutation("set_dpi_stages", { stages: next, active_dpi: store.state.active_dpi });
+    };
+
     document.getElementById("dpi-add").onclick = () => {
+      clearTimeout(dpiSelectTimer);
+      pendingDpiStage = null;
       const defaults = [400, 800, 1600, 3200, 6400, 12800];
-      const colors = ["#ff0000", "#0000ff", "#00ff00", "#ffff00", "#00ffff", "#7d00ff"];
-      const idx = s.dpi_stages.length;
-      const next = [...s.dpi_stages, { x: defaults[idx] || 1600, y: defaults[idx] || 1600, color: colors[idx] || "#ff0000" }];
-      mutate("set_dpi_stages", { stages: next, active_dpi: s.active_dpi });
+      const idx = store.state.dpi_stages.length;
+      const next = [
+        ...store.state.dpi_stages,
+        {
+          x: defaults[idx] || 1600,
+          y: defaults[idx] || 1600,
+          color: DEFAULT_DPI_COLORS[idx % DEFAULT_DPI_COLORS.length],
+        },
+      ];
+      store.state.dpi_stages = next;
+      syncDpiVisuals();
+      runDpiMutation("set_dpi_stages", { stages: next, active_dpi: store.state.active_dpi });
     };
 
     document.getElementById("dpi-rem").onclick = () => {
-      const next = s.dpi_stages.slice(0, -1);
-      mutate("set_dpi_stages", { stages: next, active_dpi: Math.min(s.active_dpi, next.length - 1) });
+      clearTimeout(dpiSelectTimer);
+      pendingDpiStage = null;
+      const next = store.state.dpi_stages.slice(0, -1);
+      const nextActive = Math.min(store.state.active_dpi, next.length - 1);
+      store.state.dpi_stages = next;
+      store.state.active_dpi = nextActive;
+      syncDpiVisuals();
+      runDpiMutation("set_dpi_stages", { stages: next, active_dpi: nextActive });
     };
 
     document.getElementById("xy-toggle").onchange = (ev) => {
       store.xySplit = ev.target.checked;
       if (!store.xySplit && active.x !== active.y) {
-        mutate("set_dpi_stage", { stage: s.active_dpi, x: active.x, y: active.x });
+        const curStage = store.state.active_dpi;
+        store.state.dpi_stages[curStage].y = active.x;
+        syncDpiVisuals();
+        runDpiMutation("set_dpi_stage", { stage: curStage, x: active.x, y: active.x }, true);
       } else {
         renderDpiPage();
       }
@@ -1166,9 +1272,22 @@
 
     const xSlider = document.getElementById("dpi-x-slider");
     const xNum = document.getElementById("dpi-x-num");
-    const commitDpi = (x, y) => mutate("set_dpi_stage", { stage: s.active_dpi, x, y });
+    const commitDpi = (x, y) => {
+      const clampedX = Math.max(s.dpi_min, Math.min(s.dpi_max, Math.round(x / s.dpi_step) * s.dpi_step));
+      const clampedY = Math.max(s.dpi_min, Math.min(s.dpi_max, Math.round(y / s.dpi_step) * s.dpi_step));
+      const stageIdx = store.state.active_dpi;
+      if (store.state.dpi_stages[stageIdx]) {
+        store.state.dpi_stages[stageIdx].x = clampedX;
+        store.state.dpi_stages[stageIdx].y = clampedY;
+      }
+      syncDpiVisuals();
+      runDpiMutation("set_dpi_stage", { stage: stageIdx, x: clampedX, y: clampedY }, true);
+    };
 
-    xSlider.oninput = () => { xNum.value = xSlider.value; };
+    xSlider.oninput = () => {
+      dpiReqSeq++;
+      xNum.value = xSlider.value;
+    };
     xSlider.onchange = () => {
       const x = Number(xSlider.value);
       const y = isSplit ? Number(document.getElementById("dpi-y-num")?.value || x) : x;
@@ -1183,7 +1302,10 @@
     if (isSplit) {
       const ySlider = document.getElementById("dpi-y-slider");
       const yNum = document.getElementById("dpi-y-num");
-      ySlider.oninput = () => { yNum.value = ySlider.value; };
+      ySlider.oninput = () => {
+        dpiReqSeq++;
+        yNum.value = ySlider.value;
+      };
       ySlider.onchange = () => commitDpi(Number(xNum.value), Number(ySlider.value));
       yNum.onchange = () => commitDpi(Number(xNum.value), Number(yNum.value));
     }

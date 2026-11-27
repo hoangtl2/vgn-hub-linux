@@ -51,6 +51,7 @@ from .protocols.base import (
     MacroSlot,
     MouseState,
 )
+from .protocols.ry_mouse import apply_local_state_update
 from .registry import list_supported_models
 from .transport import FeatureHidTransport, TransportError, discover_devices
 
@@ -265,6 +266,8 @@ class VgnHubWindow(Adw.ApplicationWindow):
         self._transport: FeatureHidTransport | None = None
         self._client: RyMouseClient | None = None
         self._hw_lock = threading.Lock()
+        self._rpc_lock = threading.Lock()
+        self._last_state: MouseState | None = None
         self._battery_timer_id: int | None = None
 
         self._apply_window_theme(self._config["theme"])
@@ -308,6 +311,7 @@ class VgnHubWindow(Adw.ApplicationWindow):
 
     def _close_hardware(self) -> None:
         with self._hw_lock:
+            self._last_state = None
             if self._transport is not None:
                 try:
                     self._transport.close()
@@ -329,6 +333,13 @@ class VgnHubWindow(Adw.ApplicationWindow):
             return client
 
     def _on_hw_dpi_event(self, dpi_idx: int) -> None:
+        with self._hw_lock:
+            client = self._client
+            state = self._last_state
+        if client is not None:
+            client.sync_active_dpi_cache(dpi_idx)
+        if state is not None and 0 <= dpi_idx < len(state.dpi_stages):
+            state.active_dpi = dpi_idx
         self._emit_event("dpi_changed", {"active_dpi": dpi_idx})
 
     def _on_battery_tick(self) -> bool:
@@ -336,13 +347,19 @@ class VgnHubWindow(Adw.ApplicationWindow):
             return True
 
         def _poll() -> None:
-            with self._hw_lock:
-                client = self._client
-                transport = self._transport
-            if client is None or transport is None or not transport.is_open:
+            if not self._rpc_lock.acquire(blocking=False):
                 return
             try:
+                with self._hw_lock:
+                    client = self._client
+                    transport = self._transport
+                if client is None or transport is None or not transport.is_open:
+                    return
                 bat = client.get_battery()
+                if self._last_state is not None:
+                    if bat.percent is not None:
+                        self._last_state.battery = bat.percent
+                    self._last_state.is_sleep = bat.is_sleep
                 self._emit_event(
                     "battery",
                     {
@@ -353,6 +370,8 @@ class VgnHubWindow(Adw.ApplicationWindow):
                 )
             except Exception:
                 pass
+            finally:
+                self._rpc_lock.release()
 
         threading.Thread(target=_poll, daemon=True).start()
         return True
@@ -431,12 +450,14 @@ class VgnHubWindow(Adw.ApplicationWindow):
     def _build_state_bundle(self) -> dict[str, Any]:
         self._config["wallpaper"] = _normalize_wallpaper(self._config.get("wallpaper"))
         if self._demo_mode:
+            self._last_state = None
             state = self._demo.read_state()
             devices: list[dict[str, Any]] = []
         else:
             self._close_hardware()
             client = self._ensure_hardware()
             state = client.read_all_state()
+            self._last_state = state
             devices = self._safe_discover_devices()
         return {
             "connected": True,
@@ -448,17 +469,21 @@ class VgnHubWindow(Adw.ApplicationWindow):
 
     def _handle_action(self, action: str, params: dict[str, Any]) -> Any:
         if action == "init":
-            try:
+            if self._demo_mode:
                 return self._build_state_bundle()
-            except (TransportError, ProtocolError) as exc:
-                self._config["wallpaper"] = _normalize_wallpaper(self._config.get("wallpaper"))
-                return {
-                    "connected": False,
-                    "error": str(exc),
-                    "devices": self._safe_discover_devices(),
-                    "config": self._config,
-                    "catalog": self._catalog_payload(),
-                }
+            with self._rpc_lock:
+                try:
+                    return self._build_state_bundle()
+                except (TransportError, ProtocolError) as exc:
+                    self._last_state = None
+                    self._config["wallpaper"] = _normalize_wallpaper(self._config.get("wallpaper"))
+                    return {
+                        "connected": False,
+                        "error": str(exc),
+                        "devices": self._safe_discover_devices(),
+                        "config": self._config,
+                        "catalog": self._catalog_payload(),
+                    }
 
         if action == "scan_devices":
             return {
@@ -473,14 +498,18 @@ class VgnHubWindow(Adw.ApplicationWindow):
             return self._build_state_bundle()
 
         if action == "connect_real":
-            device_path = params.get("device_path")
-            self._selected_device_path = str(device_path) if device_path else None
-            self._close_hardware()
-            self._demo_mode = False
-            return self._build_state_bundle()
+            with self._rpc_lock:
+                device_path = params.get("device_path")
+                self._selected_device_path = str(device_path) if device_path else None
+                self._close_hardware()
+                self._demo_mode = False
+                return self._build_state_bundle()
 
         if action == "refresh":
-            return self._build_state_bundle()
+            if self._demo_mode:
+                return self._build_state_bundle()
+            with self._rpc_lock:
+                return self._build_state_bundle()
 
         if action == "set_ui_prefs":
             if params.get("lang") in ("vi", "en"):
@@ -527,8 +556,9 @@ class VgnHubWindow(Adw.ApplicationWindow):
                 ],
             )
             if not self._demo_mode:
-                client = self._ensure_hardware()
-                client.set_macro(macro)
+                with self._rpc_lock:
+                    client = self._ensure_hardware()
+                    client.set_macro(macro)
             self._config["macros"][slot] = {
                 "slot": slot,
                 "name": name,
@@ -541,17 +571,18 @@ class VgnHubWindow(Adw.ApplicationWindow):
         if action == "read_macro":
             slot = int(params["slot"])
             if not self._demo_mode:
-                client = self._ensure_hardware()
-                local_name = str(self._config["macros"][slot]["name"])
-                m = client.get_macro(slot, name=local_name)
-                if m.events:
-                    self._config["macros"][slot] = {
-                        "slot": slot,
-                        "name": m.name,
-                        "repeat": m.repeat,
-                        "events": [asdict(e) for e in m.events],
-                    }
-                    _save_config(self._config)
+                with self._rpc_lock:
+                    client = self._ensure_hardware()
+                    local_name = str(self._config["macros"][slot]["name"])
+                    m = client.get_macro(slot, name=local_name)
+                    if m.events:
+                        self._config["macros"][slot] = {
+                            "slot": slot,
+                            "name": m.name,
+                            "repeat": m.repeat,
+                            "events": [asdict(e) for e in m.events],
+                        }
+                        _save_config(self._config)
             return {"macro": self._config["macros"][slot]}
 
         # Hardware / Demo mutating actions
@@ -559,63 +590,84 @@ class VgnHubWindow(Adw.ApplicationWindow):
             self._demo.apply(action, params)
             return {"state": self._demo.read_state().to_dict()}
 
-        client = self._ensure_hardware()
-        if action == "set_profile":
-            client.set_profile(int(params["profile"]))
-            return {"state": client.read_all_state().to_dict()}
-        if action == "set_current_dpi":
-            client.set_current_dpi(int(params["stage"]))
-        elif action == "set_dpi_stage":
-            client.set_dpi_stage(
-                int(params["stage"]),
-                int(params["x"]),
-                y=int(params["y"]) if params.get("y") is not None else None,
-                color=params.get("color"),
-            )
-        elif action == "set_dpi_color":
-            client.set_dpi_color(int(params["stage"]), str(params["color"]))
-        elif action == "set_dpi_stages":
-            stages = [
-                DpiStage(x=int(s["x"]), y=int(s.get("y", s["x"])), color=str(s.get("color", "#ff0000")))
-                for s in params["stages"]
-            ]
-            active = int(params["active_dpi"]) if params.get("active_dpi") is not None else None
-            client.set_dpi_stages(stages, active_index=active)
-        elif action == "set_polling_rate":
-            client.set_polling_rate(int(params["hz"]))
-        elif action == "set_lod":
-            client.set_lod(int(params["code"]))
-        elif action == "set_debounce":
-            client.set_debounce(int(params["ms"]))
-        elif action == "set_sleep_time":
-            client.set_sleep_time(int(params["seconds"]))
-        elif action == "set_motion_sync":
-            client.set_motion_sync(bool(params["enabled"]))
-        elif action == "set_angle_snap":
-            client.set_angle_snap(bool(params["enabled"]))
-        elif action == "set_ripple_control":
-            client.set_ripple_control(bool(params["enabled"]))
-        elif action == "set_latency_mode":
-            client.set_latency_mode(int(params["mode"]))
-        elif action == "set_fps_mode":
-            client.set_fps_mode(int(params["mode"]))
-        elif action == "set_sensor_rotation":
-            client.set_sensor_rotation(int(params["degrees"]))
-        elif action == "set_button_binding":
-            client.set_button_binding(
-                int(params["slot"]),
-                action_id=params.get("action_id"),
-                keys=params.get("keys"),
-                macro_id=params.get("macro_id"),
-                macro_loop=int(params.get("macro_loop") or 2),
-                raw=params.get("raw"),
-            )
-        elif action == "restore_factory":
-            client.restore_factory()
-        else:
-            raise ValueError(f"Unknown action: {action}")
+        with self._rpc_lock:
+            client = self._ensure_hardware()
+            button_raw: tuple[int, int, int, int] | None = None
+            if action == "set_profile":
+                client.set_profile(int(params["profile"]))
+                self._last_state = client.read_all_state()
+                return {"state": self._last_state.to_dict()}
+            if action == "set_current_dpi":
+                client.set_current_dpi(int(params["stage"]))
+            elif action == "set_dpi_stage":
+                client.set_dpi_stage(
+                    int(params["stage"]),
+                    int(params["x"]),
+                    y=int(params["y"]) if params.get("y") is not None else None,
+                    color=params.get("color"),
+                )
+            elif action == "set_dpi_color":
+                client.set_dpi_color(int(params["stage"]), str(params["color"]))
+            elif action == "set_dpi_stages":
+                stages = [
+                    DpiStage(x=int(s["x"]), y=int(s.get("y", s["x"])), color=str(s.get("color", "#ff0000")))
+                    for s in params["stages"]
+                ]
+                active = int(params["active_dpi"]) if params.get("active_dpi") is not None else None
+                client.set_dpi_stages(stages, active_index=active)
+            elif action == "set_polling_rate":
+                client.set_polling_rate(int(params["hz"]))
+            elif action == "set_lod":
+                client.set_lod(int(params["code"]))
+            elif action == "set_debounce":
+                client.set_debounce(int(params["ms"]))
+            elif action == "set_sleep_time":
+                client.set_sleep_time(int(params["seconds"]))
+            elif action == "set_motion_sync":
+                client.set_motion_sync(bool(params["enabled"]))
+            elif action == "set_angle_snap":
+                client.set_angle_snap(bool(params["enabled"]))
+            elif action == "set_ripple_control":
+                client.set_ripple_control(bool(params["enabled"]))
+            elif action == "set_latency_mode":
+                client.set_latency_mode(int(params["mode"]))
+            elif action == "set_fps_mode":
+                client.set_fps_mode(int(params["mode"]))
+            elif action == "set_sensor_rotation":
+                client.set_sensor_rotation(int(params["degrees"]))
+            elif action == "set_button_binding":
+                button_raw = client.set_button_binding(
+                    int(params["slot"]),
+                    action_id=params.get("action_id"),
+                    keys=params.get("keys"),
+                    macro_id=params.get("macro_id"),
+                    macro_loop=int(params.get("macro_loop") or 2),
+                    raw=params.get("raw"),
+                )
+            elif action == "restore_factory":
+                client.restore_factory()
+                self._last_state = client.read_all_state()
+                return {"state": self._last_state.to_dict()}
+            else:
+                raise ValueError(f"Unknown action: {action}")
 
-        return {"state": client.read_all_state().to_dict()}
+            if self._last_state is None:
+                self._last_state = client.read_all_state()
+            else:
+                dpi_result = (
+                    client.decode_cached_dpi()
+                    if action in ("set_current_dpi", "set_dpi_stage", "set_dpi_color", "set_dpi_stages")
+                    else None
+                )
+                apply_local_state_update(
+                    self._last_state,
+                    action,
+                    params,
+                    dpi_result=dpi_result,
+                    button_raw=button_raw,
+                    lod_map=dict(client.spec.lod_options),
+                )
+            return {"state": self._last_state.to_dict()}
 
     def _make_json_filter(self) -> Gio.ListStore:
         flt = Gtk.FileFilter()
@@ -685,11 +737,11 @@ class VgnHubWindow(Adw.ApplicationWindow):
 
             def _write() -> None:
                 try:
-                    backup = (
-                        self._demo.read_state().to_backup_dict()
-                        if self._demo_mode
-                        else self._ensure_hardware().export_backup()
-                    )
+                    if self._demo_mode:
+                        backup = self._demo.read_state().to_backup_dict()
+                    else:
+                        with self._rpc_lock:
+                            backup = self._ensure_hardware().export_backup()
                     Path(path).write_text(
                         json.dumps(backup, indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8",
@@ -750,9 +802,11 @@ class VgnHubWindow(Adw.ApplicationWindow):
                             self._demo.apply("set_button_binding", btn)
                         state = self._demo.read_state()
                     else:
-                        client = self._ensure_hardware()
-                        client.import_backup(data)
-                        state = client.read_all_state()
+                        with self._rpc_lock:
+                            client = self._ensure_hardware()
+                            client.import_backup(data)
+                            state = client.read_all_state()
+                            self._last_state = state
                     self._resolve_js(req_id, True, data={"path": path, "state": state.to_dict()})
                 except Exception as exc:
                     self._resolve_js(req_id, False, error=str(exc))

@@ -12,6 +12,8 @@ window.VgnMouseSvg = {
            </g>`
         : "";
 
+    const isLedOff = !ledColor || String(ledColor).toLowerCase() === "#000000";
+
     return `
       <div class="mouse-photo-wrap">
         <img class="mouse-photo-img" src="assets/dragonfly3-top.png" alt="Dragonfly 3 Ultra" draggable="false"/>
@@ -21,9 +23,13 @@ window.VgnMouseSvg = {
               <feGaussianBlur stdDeviation="3.5"/>
             </filter>
           </defs>
-          <!-- Live DPI LED tint over the front indicator bar -->
+          ${
+            isLedOff
+              ? ""
+              : `<!-- Live DPI LED tint over the front indicator bar -->
           <rect x="125" y="33" width="16" height="10" rx="5" fill="${ledColor}" opacity="0.65" filter="url(#ledBlur)"/>
-          <rect x="128" y="36" width="10" height="4" rx="2" fill="${ledColor}" opacity="0.72"/>
+          <rect x="128" y="36" width="10" height="4" rx="2" fill="${ledColor}" opacity="0.72"/>`
+          }
 
           ${hot(0, 76, 120)}
           ${hot(2, 133, 102)}
@@ -37,6 +43,7 @@ window.VgnMouseSvg = {
   },
 
   renderBottom({ ledColor = "#ffff00" } = {}) {
+    const isLedOff = !ledColor || String(ledColor).toLowerCase() === "#000000";
     return `
       <div class="mouse-photo-wrap mouse-photo-bottom">
         <img class="mouse-photo-img" src="assets/dragonfly3-bottom.png" alt="Dragonfly 3 Ultra Bottom" draggable="false"/>
@@ -49,10 +56,15 @@ window.VgnMouseSvg = {
               <stop offset="100%" stop-color="${ledColor}" stop-opacity="0"/>
             </radialGradient>
           </defs>
-          <!-- Live DPI indicator LED over the physical bottom LED aperture -->
+          ${
+            isLedOff
+              ? `<!-- LED off indicator -->
+          <circle cx="44.5" cy="127.5" r="3.2" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.35)" stroke-width="0.8"/>`
+              : `<!-- Live DPI indicator LED over the physical bottom LED aperture -->
           <circle cx="44.5" cy="127.5" r="11" fill="url(#dpiGlow)"/>
           <circle cx="44.5" cy="127.5" r="3.2" fill="${ledColor}" opacity="0.95"/>
-          <circle cx="44.5" cy="127.5" r="1.4" fill="#ffffff" opacity="0.9"/>
+          <circle cx="44.5" cy="127.5" r="1.4" fill="#ffffff" opacity="0.9"/>`
+          }
         </svg>
       </div>
     `;

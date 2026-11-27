@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import struct
+import tempfile
+import threading
+import time
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from vgn_hub.keycodes import decode_binding_bytes, encode_binding, parse_key_combo
 from vgn_hub.protocols.base import DpiStage, MacroEvent, MacroSlot
@@ -38,12 +44,13 @@ from vgn_hub.protocols.ry_mouse import (
     CMD_SET_SLEEP_TIME,
     ProtocolError,
     RyMouseClient,
+    apply_local_state_update,
     build_packet,
     compute_crc,
     encode_macro_payload,
 )
 from vgn_hub.registry import find_device_spec
-from vgn_hub.transport import HidDeviceInfo
+from vgn_hub.transport import FeatureHidTransport, HidDeviceInfo
 
 
 class MockFeatureTransport:
@@ -397,6 +404,188 @@ class TestRyMouseProtocol(unittest.TestCase):
         self.assertEqual(restored.sensor_rotation, -12)
         self.assertEqual(len(restored.dpi_stages), 2)
         self.assertEqual(restored.dpi_stages[1].color, "#445566")
+
+    def test_dpi_read_rejects_mismatched_opcode_and_retries(self) -> None:
+        tr, client = self._make_client()
+        orig_xfer = tr.xfer_feature
+        dpi_calls = 0
+
+        def flaky_xfer(payload: bytes, read: bool = True, delay: float = 0.02) -> bytes:
+            nonlocal dpi_calls
+            if payload[0] == CMD_GET_DPI_INFO:
+                dpi_calls += 1
+                if dpi_calls == 1:
+                    # Simulate a leaked CMD_GET_CONFIG packet on the first read
+                    bad = bytearray(64)
+                    bad[0] = CMD_GET_CONFIG
+                    bad[3] = 0
+                    return bytes(bad)
+            return orig_xfer(payload, read=read, delay=delay)
+
+        tr.xfer_feature = flaky_xfer  # type: ignore[method-assign]
+        active, stages = client._read_dpi_info(0)
+        self.assertEqual(dpi_calls, 2)
+        self.assertEqual(active, 3)
+        self.assertEqual(len(stages), 6)
+        self.assertEqual(stages[0].color, "#ff0000")
+
+        # If all retries return wrong opcode, raise ProtocolError and preserve prior _raw_dpi_buf
+        prior_buf = bytes(client._raw_dpi_buf)  # type: ignore[arg-type]
+
+        def always_wrong_xfer(payload: bytes, read: bool = True, delay: float = 0.02) -> bytes:
+            if payload[0] == CMD_GET_DPI_INFO:
+                bad = bytearray(64)
+                bad[0] = CMD_GET_CONFIG
+                return bytes(bad)
+            return orig_xfer(payload, read=read, delay=delay)
+
+        tr.xfer_feature = always_wrong_xfer  # type: ignore[method-assign]
+        with self.assertRaises(ProtocolError):
+            client._read_dpi_info(0)
+        self.assertEqual(bytes(client._raw_dpi_buf), prior_buf)  # type: ignore[arg-type]
+
+    def test_set_profile_invalidates_dpi_cache_and_commit_clamps_count(self) -> None:
+        tr, client = self._make_client()
+        client.read_all_state()
+        self.assertIsNotNone(client._raw_dpi_buf)
+
+        client.set_profile(2)
+        self.assertIsNone(client._raw_dpi_buf)
+        self.assertIsNone(client.decode_cached_dpi())
+
+        # Corrupt count=0 in a buffer must be clamped to >=1 before committing
+        bad_buf = bytearray(tr.dpi_buf)
+        bad_buf[3] = 0
+        bad_buf[2] = 5
+        client._commit_dpi_buf(bad_buf)
+        self.assertEqual(tr.dpi_buf[3], 1)
+        self.assertEqual(tr.dpi_buf[2], 0)
+
+    def test_decode_cached_dpi_and_sync_active_dpi_cache(self) -> None:
+        tr, client = self._make_client()
+        client.read_all_state()
+        sent_before = len(tr.sent)
+
+        client.set_current_dpi(1)
+        cached = client.decode_cached_dpi()
+        self.assertIsNotNone(cached)
+        assert cached is not None
+        self.assertEqual(cached[0], 1)
+        self.assertEqual(len(cached[1]), 6)
+        # Only a single SET_DPI_INFO write occurred (zero extra GET_DPI_INFO reads)
+        self.assertEqual(len(tr.sent) - sent_before, 1)
+        self.assertEqual(tr.sent[-1][0], CMD_SET_DPI_INFO)
+
+        client.set_dpi_color(1, "#abcdef")
+        cached2 = client.decode_cached_dpi()
+        assert cached2 is not None
+        self.assertEqual(cached2[1][1].color, "#abcdef")
+
+        client.sync_active_dpi_cache(4)
+        cached3 = client.decode_cached_dpi()
+        assert cached3 is not None
+        self.assertEqual(cached3[0], 4)
+
+    def test_wireless_concurrent_battery_and_dpi_are_serialized(self) -> None:
+        tr, client = self._make_client(wireless=True)
+        client.read_all_state()
+
+        # Verify no two threads overlap inside xfer_feature / multi-step wireless ops
+        active_lock = threading.Lock()
+        in_flight = 0
+        overlap_detected = False
+        orig_xfer = tr.xfer_feature
+
+        def guarded_xfer(payload: bytes, read: bool = True, delay: float = 0.02) -> bytes:
+            nonlocal in_flight, overlap_detected
+            with active_lock:
+                in_flight += 1
+                if in_flight > 1:
+                    overlap_detected = True
+            time.sleep(0.002)
+            try:
+                return orig_xfer(payload, read=read, delay=delay)
+            finally:
+                with active_lock:
+                    in_flight -= 1
+
+        tr.xfer_feature = guarded_xfer  # type: ignore[method-assign]
+        errors: list[Exception] = []
+
+        def worker_dpi() -> None:
+            try:
+                for i in range(6):
+                    client.set_current_dpi(i % 6)
+            except Exception as exc:
+                errors.append(exc)
+
+        def worker_bat() -> None:
+            try:
+                for _ in range(6):
+                    bat = client.get_battery()
+                    self.assertEqual(bat.percent, 88)
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(target=worker_dpi)
+        t2 = threading.Thread(target=worker_bat)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        self.assertEqual(errors, [])
+        self.assertFalse(overlap_detected)
+
+        # Also verify FeatureHidTransport.transaction reentrancy & flock path without touching /dev/hidraw
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": tmpdir}):
+                ft = FeatureHidTransport(device_path="/dev/hidraw99")
+                with ft.transaction():
+                    with ft.transaction():
+                        lock_file = Path(tmpdir) / "vgn-hub-hidraw99.lock"
+                        self.assertTrue(lock_file.is_file())
+                self.assertIsNone(ft._flock_fd)
+
+    def test_apply_local_state_update(self) -> None:
+        _, client = self._make_client()
+        st = client.read_all_state()
+
+        client.set_dpi_stage(2, 1600, y=1800, color="#11aa22")
+        apply_local_state_update(
+            st,
+            "set_dpi_stage",
+            {"stage": 2, "x": 1600, "y": 1800},
+            dpi_result=client.decode_cached_dpi(),
+        )
+        self.assertEqual(st.dpi_stages[2].x, 1600)
+        self.assertEqual(st.dpi_stages[2].y, 1800)
+        self.assertEqual(st.dpi_stages[2].color, "#11aa22")
+
+        apply_local_state_update(st, "set_polling_rate", {"hz": 4000})
+        apply_local_state_update(st, "set_lod", {"code": 0}, lod_map=dict(client.spec.lod_options))
+        apply_local_state_update(st, "set_debounce", {"ms": 2})
+        apply_local_state_update(st, "set_sleep_time", {"seconds": 60})
+        apply_local_state_update(st, "set_motion_sync", {"enabled": False})
+        apply_local_state_update(st, "set_angle_snap", {"enabled": True})
+        apply_local_state_update(st, "set_ripple_control", {"enabled": True})
+        apply_local_state_update(st, "set_latency_mode", {"mode": 1})
+        apply_local_state_update(st, "set_fps_mode", {"mode": 1})
+        apply_local_state_update(st, "set_sensor_rotation", {"degrees": -15})
+        raw4 = encode_binding(action_id="disable")
+        apply_local_state_update(st, "set_button_binding", {"slot": 3}, button_raw=raw4)
+
+        self.assertEqual(st.polling_hz, 4000)
+        self.assertEqual(st.lod_mm, "0.7mm")
+        self.assertEqual(st.debounce_ms, 2)
+        self.assertEqual(st.sleep_seconds, 60)
+        self.assertFalse(st.motion_sync)
+        self.assertTrue(st.angle_snap)
+        self.assertTrue(st.ripple_control)
+        self.assertEqual(st.latency_mode, 1)
+        self.assertEqual(st.fps_mode, 1)
+        self.assertEqual(st.sensor_rotation, -15)
+        self.assertEqual(st.buttons[3].action_id, "disable")
 
 
 if __name__ == "__main__":
