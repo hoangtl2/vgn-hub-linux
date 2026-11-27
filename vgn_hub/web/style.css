@@ -746,70 +746,180 @@ body.theme-solid .bg-ambient {
 .mode-card-desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 
 /* Sensor Rotation Dial */
-.rotation-layout {
+.rotation-card {
+  padding: 16px 20px 20px;
+}
+
+.rotation-header {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rotation-pill {
+  align-self: flex-start;
+  cursor: default;
+  padding: 6px 14px;
+  font-size: 12.5px;
+}
+
+.rotation-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.rotation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.38fr) 1px minmax(150px, 0.78fr);
   align-items: center;
-  justify-content: space-around;
   gap: 18px;
-  padding: 12px 0;
-  flex-wrap: wrap;
+  padding: 6px 0 4px;
+}
+
+.rotation-left {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 0;
 }
 
 .dial-controls {
   display: flex;
   align-items: center;
-  gap: 18px;
+  justify-content: center;
+  gap: 16px;
 }
 
 .step-col {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  margin-bottom: 34px;
 }
 
-.dial-circle {
-  position: relative;
-  width: 148px;
-  height: 148px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #2c2f3a, #121319);
-  border: 2px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+.rot-step-btn {
+  width: 72px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.14s ease;
+}
+
+.rot-step-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+}
+
+.rot-step-btn:active {
+  transform: scale(0.97);
+}
+
+.dial-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.dial-interactive {
+  width: 266px;
+  height: 228px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
-  touch-action: none;
 }
 
-.dial-circle:active { cursor: grabbing; }
+.dial-interactive:active { cursor: grabbing; }
 
-.dial-needle {
-  position: absolute;
-  inset: 8px;
+.rot-dial-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+
+.dial-tick-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  fill: rgba(236, 234, 245, 0.72);
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 
-.dial-needle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 3px;
-  height: 22px;
-  border-radius: 2px;
-  background: var(--gold);
-  box-shadow: 0 0 8px var(--gold);
-}
-
-.dial-readout {
-  font-size: 26px;
-  font-weight: 800;
+.dial-readout-svg {
+  font-size: 30px;
+  font-weight: 500;
+  fill: #f7f6fb;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 
-.mouse-svg-wire { width: 168px; height: 200px; }
+.rot-needle-group.is-smooth,
+.wire-mouse-group.is-smooth {
+  transition: transform 0.14s ease-out;
+}
+
+.rot-reset-btn {
+  min-width: 112px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.14s ease;
+}
+
+.rot-reset-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+}
+
+.rotation-divider {
+  width: 1px;
+  height: 210px;
+  background: var(--border-subtle);
+  justify-self: center;
+}
+
+.rotation-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.mouse-svg-wire {
+  width: 170px;
+  height: 204px;
+  display: block;
+  overflow: visible;
+}
+
+@media (max-width: 1120px) {
+  .rotation-layout {
+    grid-template-columns: minmax(0, 1.45fr) 1px minmax(112px, 0.65fr);
+    gap: 10px;
+  }
+  .dial-controls { gap: 8px; }
+  .rot-step-btn { width: 54px; height: 30px; font-size: 11.5px; }
+  .dial-interactive { width: 212px; height: 182px; }
+  .mouse-svg-wire { width: 118px; height: 142px; }
+  .rotation-divider { height: 170px; }
+}
 
 /* Parameters 2-Col Grid */
 .params-grid {

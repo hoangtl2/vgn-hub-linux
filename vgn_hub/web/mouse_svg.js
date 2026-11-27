@@ -58,18 +58,119 @@ window.VgnMouseSvg = {
     `;
   },
 
+  rotationArcPath(cx, cy, r, sensorDeg) {
+    const visDeg = sensorDeg * 1.5;
+    if (Math.abs(visDeg) < 0.01) return "";
+    const rad = ((visDeg - 90) * Math.PI) / 180;
+    const ex = cx + r * Math.cos(rad);
+    const ey = cy + r * Math.sin(rad);
+    const sweep = visDeg > 0 ? 1 : 0;
+    return `M ${cx.toFixed(2)} ${(cy - r).toFixed(2)} A ${r} ${r} 0 0 ${sweep} ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+  },
+
+  renderRotationDial({ angle = 0 } = {}) {
+    const cx = 148;
+    const cy = 144;
+    const R_OUTER = 104;
+    const R_BAND = 88;
+    const R_INNER = 74;
+    const R_LABEL = 123;
+
+    const polar = (r, visDeg) => {
+      const rad = ((visDeg - 90) * Math.PI) / 180;
+      return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+    };
+
+    const spanArc = (r) => {
+      const [sx, sy] = polar(r, -135);
+      const [ex, ey] = polar(r, 135);
+      return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 1 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+    };
+
+    let ticks = "";
+    let labels = "";
+    for (let deg = -90; deg <= 90; deg += 5) {
+      const visDeg = deg * 1.5;
+      const isMajor = deg % 15 === 0;
+      const rIn = isMajor ? 95 : 99;
+      const [x1, y1] = polar(rIn, visDeg);
+      const [x2, y2] = polar(R_OUTER, visDeg);
+      const stroke = isMajor
+        ? deg === 0
+          ? "rgba(255,255,255,0.85)"
+          : "rgba(255,255,255,0.48)"
+        : "rgba(255,255,255,0.22)";
+      const sw = isMajor ? (deg === 0 ? 1.5 : 1.2) : 1;
+      ticks += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${stroke}" stroke-width="${sw}"/>`;
+
+      if (isMajor) {
+        const [lx, ly] = polar(R_LABEL, visDeg);
+        labels += `<text class="dial-tick-label" x="${lx.toFixed(2)}" y="${ly.toFixed(2)}" text-anchor="middle" dominant-baseline="central">${deg}°</text>`;
+      }
+    }
+
+    return `
+      <svg class="rot-dial-svg" viewBox="0 0 296 254" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id="rotNeedleGlow" x="-120%" y="-40%" width="340%" height="180%">
+            <feGaussianBlur stdDeviation="2.6"/>
+          </filter>
+          <filter id="rotKnobShadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="7"/>
+          </filter>
+          <linearGradient id="rotKnobBevel" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#50535f"/>
+            <stop offset="48%" stop-color="#292b34"/>
+            <stop offset="100%" stop-color="#121318"/>
+          </linearGradient>
+          <radialGradient id="rotKnobFace" cx="35%" cy="25%" r="72%">
+            <stop offset="0%" stop-color="#2b2d35"/>
+            <stop offset="60%" stop-color="#1b1c22"/>
+            <stop offset="100%" stop-color="#13141a"/>
+          </radialGradient>
+        </defs>
+
+        <!-- Static 270deg radial track -->
+        <path d="${spanArc(R_BAND)}" fill="none" stroke="rgba(255,255,255,0.065)" stroke-width="28"/>
+        <path d="${spanArc(R_OUTER)}" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+        <path d="${spanArc(R_INNER)}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+        <!-- Live active swept angle highlight -->
+        <path id="rot-active-arc" d="${this.rotationArcPath(cx, cy, R_BAND, angle)}" fill="none" stroke="rgba(222,238,94,0.16)" stroke-width="28"/>
+        <path id="rot-active-rim" d="${this.rotationArcPath(cx, cy, R_OUTER, angle)}" fill="none" stroke="#dce960" stroke-width="2" stroke-opacity="0.75"/>
+
+        ${ticks}
+        ${labels}
+
+        <!-- Rotating pointer needle -->
+        <g id="rot-needle-group" class="rot-needle-group" transform="rotate(${angle * 1.5} ${cx} ${cy})">
+          <line x1="${cx}" y1="73" x2="${cx}" y2="41" stroke="#e2f064" stroke-width="6" stroke-linecap="round" opacity="0.32" filter="url(#rotNeedleGlow)"/>
+          <line x1="${cx}" y1="73" x2="${cx}" y2="40" stroke="#e7f36e" stroke-width="2.6" stroke-linecap="round"/>
+        </g>
+
+        <!-- Sculpted 3D metallic knob -->
+        <circle cx="${cx}" cy="152" r="71" fill="rgba(0,0,0,0.6)" filter="url(#rotKnobShadow)"/>
+        <circle cx="${cx}" cy="${cy}" r="72" fill="url(#rotKnobBevel)" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+        <circle cx="${cx}" cy="${cy}" r="61" fill="url(#rotKnobFace)" stroke="rgba(0,0,0,0.45)" stroke-width="1.2"/>
+        <text id="rot-val" class="dial-readout-svg" x="${cx}" y="145" text-anchor="middle" dominant-baseline="central">${angle}°</text>
+      </svg>
+    `;
+  },
+
   renderWireframe({ angle = 0 } = {}) {
     return `
-      <svg class="mouse-svg-wire" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
-        <line x1="100" y1="10" x2="100" y2="230" stroke="rgba(255,255,255,0.12)" stroke-dasharray="4 4"/>
-        <line x1="14" y1="120" x2="186" y2="120" stroke="rgba(255,255,255,0.12)" stroke-dasharray="4 4"/>
-        <g transform="rotate(${angle} 100 120)">
-          <path d="M100 28 C70 28 56 39 53 62 C51 84 51 106 52 126 C53 150 51 174 56 194 C63 210 79 216 100 216 C121 216 137 210 144 194 C149 174 147 150 148 126 C149 106 149 84 147 62 C144 39 130 28 100 28 Z"
-                fill="rgba(255,255,255,0.03)" stroke="rgba(244,243,248,0.68)" stroke-width="1.5"/>
-          <path d="M52 104 L148 104" fill="none" stroke="rgba(244,243,248,0.45)" stroke-width="1.2"/>
-          <line x1="100" y1="28" x2="100" y2="104" stroke="rgba(244,243,248,0.45)" stroke-width="1.2"/>
-          <rect x="92" y="47" width="16" height="34" rx="7" fill="rgba(116,185,255,0.35)" stroke="#74b9ff" stroke-width="1.2"/>
-          <path d="M100 14 L94 25 L106 25 Z" fill="#f7d06b"/>
+      <svg class="mouse-svg-wire" viewBox="0 0 210 250" xmlns="http://www.w3.org/2000/svg">
+        <g id="wire-mouse-group" class="wire-mouse-group" transform="rotate(${angle} 105 125)">
+          <path d="M105 26 C72 26 57 38 55 64 C54 88 55 112 56 132 C57 156 54 180 61 200 C69 218 85 224 105 224 C125 224 141 218 149 200 C156 180 153 156 154 132 C155 112 156 88 155 64 C153 38 138 26 105 26 Z"
+                fill="rgba(255,255,255,0.02)" stroke="rgba(244,243,248,0.68)" stroke-width="1.25"/>
+          <path d="M55 82 L52.5 84 L52.5 103 L55.3 105" fill="none" stroke="rgba(244,243,248,0.52)" stroke-width="1.1"/>
+          <path d="M55.5 110 L53 112 L53 132 L56 134" fill="none" stroke="rgba(244,243,248,0.52)" stroke-width="1.1"/>
+          <path d="M60 44 C59 64 59 84 60 100 C60.5 104 63 106 67 106 L143 106 C147 106 149.5 104 150 100 C151 84 151 64 150 44"
+                fill="none" stroke="rgba(244,243,248,0.52)" stroke-width="1.1"/>
+          <line x1="105" y1="26" x2="105" y2="43" stroke="rgba(244,243,248,0.52)" stroke-width="1.1"/>
+          <line x1="105" y1="77" x2="105" y2="106" stroke="rgba(244,243,248,0.52)" stroke-width="1.1"/>
+          <rect x="97.5" y="43" width="15" height="34" rx="5.5" fill="rgba(255,255,255,0.05)" stroke="rgba(244,243,248,0.55)" stroke-width="1"/>
+          <rect x="99.5" y="45.5" width="11" height="29" rx="3.5" fill="rgba(232,232,242,0.72)" stroke="rgba(255,255,255,0.85)" stroke-width="0.75"/>
         </g>
       </svg>
     `;

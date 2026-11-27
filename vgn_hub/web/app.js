@@ -70,6 +70,7 @@
   };
 
   let nextReqId = 1;
+  let rotCommitTimer = null;
   const pending = new Map();
 
   function rpc(action, params = {}) {
@@ -910,81 +911,124 @@
         ${window.VgnMouseSvg.renderTop({ ledColor: activeLedColor(), compact: false })}
       </section>
 
-      <section class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <div class="card-title">${t.rotation.title}</div>
-            <div class="card-sub">${t.rotation.desc}</div>
-          </div>
-          <button id="rot-reset" class="btn-secondary">${t.rotation.resetZero}</button>
+      <section class="card rotation-card">
+        <div class="rotation-header">
+          <span class="tab-btn is-active rotation-pill">${t.nav.rotation}</span>
+          <div class="rotation-sub">${t.rotation.desc}</div>
         </div>
 
         <div class="rotation-layout">
-          <div class="dial-controls">
-            <div class="step-col">
-              <button class="btn-secondary" data-delta="-1">-1°</button>
-              <button class="btn-secondary" data-delta="-5">-5°</button>
-              <button class="btn-secondary" data-delta="-10">-10°</button>
-            </div>
+          <div class="rotation-left">
+            <div class="dial-controls">
+              <div class="step-col">
+                <button class="rot-step-btn" data-delta="-1">-1°</button>
+                <button class="rot-step-btn" data-delta="-5">-5°</button>
+                <button class="rot-step-btn" data-delta="-10">-10°</button>
+              </div>
 
-            <div class="dial-circle" id="rot-dial">
-              <div class="dial-needle" id="rot-needle" style="transform:rotate(${angle}deg)"></div>
-              <div class="dial-readout" id="rot-val">${angle}°</div>
-            </div>
+              <div class="dial-stage">
+                <div class="dial-interactive" id="rot-dial">
+                  ${window.VgnMouseSvg.renderRotationDial({ angle })}
+                </div>
+                <button id="rot-reset" class="rot-reset-btn">${t.rotation.resetZero}</button>
+              </div>
 
-            <div class="step-col">
-              <button class="btn-secondary" data-delta="1">+1°</button>
-              <button class="btn-secondary" data-delta="5">+5°</button>
-              <button class="btn-secondary" data-delta="10">+10°</button>
+              <div class="step-col">
+                <button class="rot-step-btn" data-delta="1">+1°</button>
+                <button class="rot-step-btn" data-delta="5">+5°</button>
+                <button class="rot-step-btn" data-delta="10">+10°</button>
+              </div>
             </div>
           </div>
 
-          <div id="wire-wrap">
+          <div class="rotation-divider" aria-hidden="true"></div>
+
+          <div class="rotation-right" id="wire-wrap">
             ${window.VgnMouseSvg.renderWireframe({ angle })}
           </div>
         </div>
       </section>
     `;
 
-    const updatePreview = (deg) => {
+    const updatePreview = (deg, animate = false) => {
       angle = Math.max(-90, Math.min(90, Math.round(deg)));
-      document.getElementById("rot-needle").style.transform = `rotate(${angle}deg)`;
-      document.getElementById("rot-val").textContent = `${angle}°`;
-      document.getElementById("wire-wrap").innerHTML = window.VgnMouseSvg.renderWireframe({ angle });
+      const needleGroup = document.getElementById("rot-needle-group");
+      const valEl = document.getElementById("rot-val");
+      const arcEl = document.getElementById("rot-active-arc");
+      const rimEl = document.getElementById("rot-active-rim");
+      const wireGroup = document.getElementById("wire-mouse-group");
+
+      if (needleGroup) {
+        needleGroup.classList.toggle("is-smooth", animate);
+        needleGroup.setAttribute("transform", `rotate(${angle * 1.5} 148 144)`);
+      }
+      if (valEl) valEl.textContent = `${angle}°`;
+      if (arcEl) arcEl.setAttribute("d", window.VgnMouseSvg.rotationArcPath(148, 144, 88, angle));
+      if (rimEl) rimEl.setAttribute("d", window.VgnMouseSvg.rotationArcPath(148, 144, 104, angle));
+      if (wireGroup) {
+        wireGroup.classList.toggle("is-smooth", animate);
+        wireGroup.setAttribute("transform", `rotate(${angle} 105 125)`);
+      }
+    };
+
+    const commitRotation = (targetDeg) => {
+      if (rotCommitTimer) {
+        clearTimeout(rotCommitTimer);
+        rotCommitTimer = null;
+      }
+      if (targetDeg !== store.state?.sensor_rotation) {
+        mutate("set_sensor_rotation", { degrees: targetDeg });
+      }
     };
 
     stage.querySelectorAll("[data-delta]").forEach((btn) => {
       btn.onclick = () => {
-        const next = Math.max(-90, Math.min(90, angle + Number(btn.dataset.delta)));
-        mutate("set_sensor_rotation", { degrees: next });
+        updatePreview(angle + Number(btn.dataset.delta), true);
+        if (rotCommitTimer) clearTimeout(rotCommitTimer);
+        rotCommitTimer = setTimeout(() => commitRotation(angle), 220);
       };
     });
 
-    document.getElementById("rot-reset").onclick = () => mutate("set_sensor_rotation", { degrees: 0 });
+    document.getElementById("rot-reset").onclick = () => {
+      updatePreview(0, true);
+      commitRotation(0);
+    };
 
     const dial = document.getElementById("rot-dial");
     let dragging = false;
     const calcPointerAngle = (ev) => {
-      const rect = dial.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const rad = Math.atan2(ev.clientX - cx, -(ev.clientY - cy));
-      const deg = (rad * 180) / Math.PI;
-      return Math.max(-90, Math.min(90, Math.round(deg)));
+      const svg = dial.querySelector(".rot-dial-svg") || dial;
+      const rect = svg.getBoundingClientRect();
+      const cx = rect.left + rect.width * (148 / 296);
+      const cy = rect.top + rect.height * (144 / 254);
+      const rawDeg = (Math.atan2(ev.clientX - cx, -(ev.clientY - cy)) * 180) / Math.PI;
+      if (Math.abs(rawDeg) > 135) {
+        return angle >= 0 ? 90 : -90;
+      }
+      return Math.max(-90, Math.min(90, Math.round(rawDeg / 1.5)));
     };
     dial.onpointerdown = (ev) => {
+      if (rotCommitTimer) {
+        clearTimeout(rotCommitTimer);
+        rotCommitTimer = null;
+      }
       dragging = true;
       dial.setPointerCapture(ev.pointerId);
-      updatePreview(calcPointerAngle(ev));
+      updatePreview(calcPointerAngle(ev), false);
     };
     dial.onpointermove = (ev) => {
       if (!dragging) return;
-      updatePreview(calcPointerAngle(ev));
+      updatePreview(calcPointerAngle(ev), false);
     };
     dial.onpointerup = () => {
       if (!dragging) return;
       dragging = false;
-      mutate("set_sensor_rotation", { degrees: angle });
+      commitRotation(angle);
+    };
+    dial.onpointercancel = () => {
+      if (!dragging) return;
+      dragging = false;
+      updatePreview(store.state.sensor_rotation, true);
     };
   }
 
