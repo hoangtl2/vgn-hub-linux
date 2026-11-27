@@ -19,4 +19,4 @@ vgn-hub-gui = "vgn_hub.gui:main"
 include = ["vgn_hub*"]
 
 [tool.setuptools.package-data]
-vgn_hub = ["web/*"]
+vgn_hub = ["web/*", "web/assets/*"]
