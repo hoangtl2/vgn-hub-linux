@@ -248,7 +248,7 @@ window.VGN_I18N = {
     rotation: {
       title: "Sensor Rotation",
       desc: "Adjust the optical sensor angle (-90° to +90°) to match your natural wrist & grip sweep.",
-      resetZero: "Reset 0°",
+      resetZero: "Reset to 0°",
     },
     params: {
       lodTitle: "LOD Lift-Off Distance",
