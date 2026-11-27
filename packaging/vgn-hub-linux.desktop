@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=VGN Hub Linux
+Comment=Native Linux configurator for VGN Dragonfly 3 Ultra & VGN mice
+Exec=vgn-hub-gui
+Icon=input-mouse
+Terminal=false
+Categories=Utility;Settings;HardwareSettings;
+Keywords=mouse;vgn;dragonfly;dpi;polling;macro;hid;
+StartupNotify=true

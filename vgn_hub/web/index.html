@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VGN HUB Linux</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="theme-glass">
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="bg-watermark">GAME ON</div>
+  </div>
+
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 28 28" width="22" height="22">
+            <path d="M4 7 L14 23 L24 7 L19.5 7 L14 16 L8.5 7 Z" fill="url(#vgnGrad)"/>
+            <defs>
+              <linearGradient id="vgnGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#f7d06b"/>
+                <stop offset="100%" stop-color="#ff6b8b"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <span class="brand-name">VGN HUB</span>
+        <span class="brand-tag">LINUX</span>
+      </div>
+
+      <div class="topbar-actions">
+        <div id="conn-pill" class="pill pill-muted">...</div>
+        <div id="battery-pill" class="pill pill-bat" hidden>100%</div>
+        <button id="btn-refresh" class="icon-btn" title="Refresh">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
+          </svg>
+        </button>
+        <button id="btn-theme" class="seg-btn" title="Glass / Solid">Glass</button>
+        <button id="btn-lang" class="seg-btn" title="Tiếng Việt / English">VI</button>
+      </div>
+    </header>
+
+    <!-- 3-Column Body -->
+    <div class="workspace">
+      <!-- Left Sidebar -->
+      <aside class="sidebar-left">
+        <div class="device-card">
+          <div class="device-thumb" id="sidebar-thumb"></div>
+          <div class="device-meta">
+            <div class="device-title" id="sidebar-device-name">Dragonfly 3 Ultra</div>
+            <div class="device-sub">
+              <span id="sidebar-bat">100%</span>
+              <span>·</span>
+              <span id="sidebar-mode">Wired USB</span>
+            </div>
+            <div class="device-fw" id="sidebar-fw">fw v0807 · PAW3950</div>
+          </div>
+        </div>
+
+        <div class="nav-section-label" data-i18n="navSection">Mouse</div>
+        <nav class="nav-list" id="nav-list"></nav>
+
+        <div class="sidebar-footer">
+          <button id="btn-demo-toggle" class="ghost-btn full-width"></button>
+        </div>
+      </aside>
+
+      <!-- Center Main Stage -->
+      <main class="main-stage" id="main-stage">
+        <div class="loading-box" id="loading-box">
+          <div class="spinner"></div>
+          <p data-i18n="connecting">Đang kết nối thiết bị...</p>
+        </div>
+      </main>
+
+      <!-- Right Sidebar -->
+      <aside class="sidebar-right">
+        <div class="right-title" data-i18n="profileHeader">Profile</div>
+        <div class="profile-list" id="profile-list"></div>
+
+        <div class="telemetry-card">
+          <div class="telemetry-title" data-i18n="telemetryHeader">Thông số nhanh</div>
+          <div class="telemetry-grid" id="telemetry-grid"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Toast & Confirmation Modal -->
+  <div id="toast-container" class="toast-container"></div>
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <h3 id="modal-title"></h3>
+      <p id="modal-body"></p>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn-secondary"></button>
+        <button id="modal-confirm" class="btn-danger"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="i18n.js"></script>
+  <script src="mouse_svg.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
